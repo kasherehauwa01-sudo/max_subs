@@ -45,6 +45,12 @@ cp .env.example .env
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+Проверка helper-логики (unit-тесты):
+
+```bash
+python -m unittest tests/test_main.py -v
+```
+
 Проверка здоровья:
 
 ```bash
