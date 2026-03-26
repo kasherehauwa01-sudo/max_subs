@@ -8,6 +8,7 @@ import time
 from typing import Any, Optional
 
 import requests
+import uvicorn
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -417,3 +418,46 @@ async def webhook(
 
     background_tasks.add_task(process_update, payload)
     return JSONResponse({"ok": True, "accepted": True})
+
+
+def run() -> None:
+    """
+    Запуск Uvicorn с логами в stdout.
+    Это нужно для платформ, где stderr автоматически помечается как error.
+    """
+    log_level = os.getenv("LOG_LEVEL", "INFO").lower()
+    port = int(os.getenv("PORT", "8000"))
+    log_config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {
+                "format": "%(asctime)s %(levelname)s %(name)s %(message)s",
+            },
+            "access": {
+                "format": '%(asctime)s %(levelname)s %(name)s %(client_addr)s - "%(request_line)s" %(status_code)s',
+            },
+        },
+        "handlers": {
+            "default": {
+                "class": "logging.StreamHandler",
+                "formatter": "default",
+                "stream": "ext://sys.stdout",
+            },
+            "access": {
+                "class": "logging.StreamHandler",
+                "formatter": "access",
+                "stream": "ext://sys.stdout",
+            },
+        },
+        "loggers": {
+            "uvicorn": {"handlers": ["default"], "level": log_level.upper(), "propagate": False},
+            "uvicorn.error": {"handlers": ["default"], "level": log_level.upper(), "propagate": False},
+            "uvicorn.access": {"handlers": ["access"], "level": log_level.upper(), "propagate": False},
+        },
+    }
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level=log_level, log_config=log_config)
+
+
+if __name__ == "__main__":
+    run()

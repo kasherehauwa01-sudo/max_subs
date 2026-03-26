@@ -45,6 +45,8 @@ cp .env.example .env
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+> Для Railway используется `python main.py` (см. `Procfile`), чтобы логи Uvicorn шли в stdout.
+
 Проверка helper-логики (unit-тесты):
 
 ```bash
@@ -146,7 +148,7 @@ MAX_API_BASE_URL=https://platform-api.max.ru
 ## Деплой на Railway
 
 - Проект уже содержит `Procfile`:
-  - `web: uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}`
+  - `web: python main.py`
 - На Railway добавьте переменные:
   - `MAX_BOT_TOKEN`
   - `MAX_API_BASE_URL` (обычно `https://platform-api.max.ru`)
@@ -180,7 +182,7 @@ MAX_API_BASE_URL=https://platform-api.max.ru
    - `MAX_WEBHOOK_SECRET=<секрет>` (если использовали `secret` в `POST /subscriptions`)
 
 3. **Команда запуска корректная**
-   - Используется `Procfile`: `web: uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}`.
+   - Используется `Procfile`: `web: python main.py`.
    - Railway сам передаёт `PORT`, менять вручную обычно не нужно.
 
 4. **Проверка доступности из интернета**
