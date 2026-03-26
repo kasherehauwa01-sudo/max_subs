@@ -149,6 +149,38 @@ MAX_API_BASE_URL=https://platform-api.max.ru
 
 ---
 
+
+### Обязательные настройки в Railway (чеклист)
+
+Чтобы в логах Railway начали появляться webhook-события от MAX, проверьте:
+
+1. **Публичный HTTPS-домен включён**
+   - В Railway должен быть выдан публичный домен вида `https://<app>.up.railway.app`.
+   - Бот MAX не сможет слать события на приватный/internal URL.
+
+2. **Переменные окружения заданы**
+   - `MAX_BOT_TOKEN=<токен из MAX>`
+   - `MAX_API_BASE_URL=https://platform-api.max.ru`
+   - `MAX_TIMEOUT_SECONDS=10`
+   - `LOG_LEVEL=INFO`
+   - `MAX_WEBHOOK_SECRET=<секрет>` (если использовали `secret` в `POST /subscriptions`)
+
+3. **Команда запуска корректная**
+   - Используется `Procfile`: `web: uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}`.
+   - Railway сам передаёт `PORT`, менять вручную обычно не нужно.
+
+4. **Проверка доступности из интернета**
+   - `GET https://<домен>/health` должен вернуть `200`.
+   - `GET https://<домен>/webhook` должен вернуть `200` (подсказка endpoint жив).
+   - `POST` от MAX должен приходить на `https://<домен>/webhook`.
+
+5. **Webhook в MAX указывает именно на Railway-домен**
+   - В подписке должен быть URL `https://<домен>/webhook` (ровно этот путь).
+
+6. **Если задан secret в подписке, он 1-в-1 совпадает с Railway переменной**
+   - `secret` из `POST /subscriptions` == `MAX_WEBHOOK_SECRET`.
+   - Любое расхождение → сервер вернёт `401`, событие не будет обработано.
+
 ## Обработка ошибок
 
 - Если webhook пришёл с невалидным JSON → `400`.
