@@ -268,6 +268,7 @@ curl -X POST "https://platform-api.max.ru/subscriptions" \
 Чтобы не делать `curl` вручную, в приложении добавлены:
 
 - `POST /setup/subscription` — сервер сам вызывает `POST https://platform-api.max.ru/subscriptions`.
+- `GET /subscribe` и `POST /subscribe` — удобные алиасы для ручной регистрации (чтобы не получать `404` при проверке `/subscribe`).
 - опциональная автоподписка на старте приложения через `MAX_WEBHOOK_AUTO_REGISTER=true`.
 
 Нужные переменные окружения:
@@ -281,6 +282,12 @@ MAX_WEBHOOK_AUTO_REGISTER=true
 
 ```bash
 curl -X POST "https://maxsubs-production.up.railway.app/setup/subscription"
+```
+
+или (алиас, который можно открыть даже из браузера):
+
+```bash
+curl "https://maxsubs-production.up.railway.app/subscribe"
 ```
 
 > Endpoint использует `MAX_BOT_TOKEN` из окружения и не требует передавать токен в URL/теле запроса.

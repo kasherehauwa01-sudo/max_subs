@@ -224,6 +224,20 @@ def setup_subscription() -> JSONResponse:
     result = register_webhook_subscription()
     return JSONResponse({"ok": True, "subscription": result})
 
+
+@app.get("/subscribe")
+def subscribe_get() -> JSONResponse:
+    """Удобный endpoint для ручной проверки из браузера/Railway (GET)."""
+    result = register_webhook_subscription()
+    return JSONResponse({"ok": True, "subscription": result, "hint": "Webhook subscription registered via GET /subscribe"})
+
+
+@app.post("/subscribe")
+def subscribe_post() -> JSONResponse:
+    """Алиас на setup endpoint: регистрация webhook через POST /subscribe."""
+    result = register_webhook_subscription()
+    return JSONResponse({"ok": True, "subscription": result, "hint": "Webhook subscription registered via POST /subscribe"})
+
 def process_update(payload: dict[str, Any]) -> None:
     dedup_key = extract_dedup_key(payload)
     if dedup_key and _is_duplicate_and_mark(dedup_key):
