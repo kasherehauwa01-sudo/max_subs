@@ -50,6 +50,12 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 curl http://localhost:8000/health
 ```
 
+Проверка авторизации в MAX API (проверка токена через `GET /me`):
+
+```bash
+curl http://localhost:8000/health/max
+```
+
 ---
 
 ## Пример входящего webhook JSON
@@ -119,6 +125,10 @@ MAX_API_BASE_URL=https://platform-api.max.ru
 
 ## Настройка webhook в MAX
 
+
+> Требования MAX к webhook: публичный HTTPS URL (обычно 443), валидный TLS-сертификат от доверенного CA, и ответ `HTTP 200` не дольше чем за ~30 секунд.
+
+
 1. Задеплойте приложение (например, Railway) и получите публичный URL.
 2. В настройках вашего бота MAX укажите webhook:
    - `https://your-domain.com/webhook`
@@ -134,6 +144,7 @@ MAX_API_BASE_URL=https://platform-api.max.ru
   - `MAX_BOT_TOKEN`
   - `MAX_API_BASE_URL` (обычно `https://platform-api.max.ru`)
   - `MAX_TIMEOUT_SECONDS` (например, `10`)
+  - `MAX_WEBHOOK_SECRET` (если указываете `secret` при создании подписки)
   - `LOG_LEVEL` (`INFO`)
 
 ---
@@ -153,6 +164,18 @@ MAX_API_BASE_URL=https://platform-api.max.ru
 
 
 ## Как проверить регистрацию webhook на стороне MAX API
+
+
+### Базовая проверка токена через MAX API (`/me`)
+
+Вы можете проверить токен напрямую (как вы и написали):
+
+```bash
+curl -X GET "https://platform-api.max.ru/me"   -H "Authorization: <MAX_BOT_TOKEN>"
+```
+
+Если ответ `200`, токен валиден и API доступно.
+
 
 > Важно: проверка делается на `platform-api.max.ru`, а не на вашем домене Railway.
 
@@ -182,6 +205,28 @@ curl -sS -X POST "https://platform-api.max.ru/subscriptions"   -H "Authorization
 - Напишите боту сообщение в MAX.
 - Откройте логи Railway: должен появиться `POST /webhook`.
 - Если в логах только `GET /webhook` или вообще нет обращений, MAX не доставляет webhook на ваш URL.
+
+
+### Рекомендуемая защита webhook через `secret`
+
+При создании подписки можно передать поле `secret`, тогда MAX присылает заголовок `X-Max-Bot-Api-Secret`.
+В этом проекте проверка включается автоматически, если задана переменная `MAX_WEBHOOK_SECRET`.
+
+Пример создания подписки с секретом:
+
+```bash
+curl -X POST "https://platform-api.max.ru/subscriptions"   -H "Authorization: <MAX_BOT_TOKEN>"   -H "Content-Type: application/json"   -d '{
+    "url": "https://<ваш-домен>/webhook",
+    "update_types": ["message_created", "bot_started"],
+    "secret": "your_webhook_secret"
+  }'
+```
+
+И в Railway нужно задать такую же переменную:
+
+```env
+MAX_WEBHOOK_SECRET=your_webhook_secret
+```
 
 ## Шаблон запроса в техподдержку MAX
 
@@ -280,5 +325,6 @@ curl -X GET "https://platform-api.max.ru/updates"   -H "Authorization: <MAX_BOT_
 1. Пользователь пишет боту в MAX.
 2. MAX шлёт webhook на ваш сервер.
 3. Сервер достаёт ID пользователя из JSON.
-4. Сервер отправляет в MAX ответ:
+4. Сервер сразу возвращает `200 OK` в webhook (чтобы уложиться в тайм-аут доставки), а обработку делает в фоне.
+5. Сервер отправляет в MAX ответ:
    - 👉 `Ваш ID: 123456789`
