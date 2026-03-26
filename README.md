@@ -151,6 +151,7 @@ MAX_API_BASE_URL=https://platform-api.max.ru
   - `MAX_WEBHOOK_UPDATE_TYPES` (например, `message_created,bot_started,message_callback`)
   - `MAX_STARTUP_SELF_CHECK` (`true/false`, проверка `GET /me` при старте)
   - `LOG_LEVEL` (`INFO`)
+  - `MAX_WEBHOOK_AUTO_REGISTER` (рекомендуется `true`, по умолчанию в коде теперь `true`)
 
 `MAX_WEBHOOK_URL` можно не задавать, если в Railway включён Public Domain: тогда приложение автоматически соберёт URL как `https://$RAILWAY_PUBLIC_DOMAIN/webhook`.
 
