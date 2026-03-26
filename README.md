@@ -7,7 +7,8 @@
 1. Получает POST-событие от MAX на `POST /webhook`.
 2. Извлекает идентификатор пользователя из полей события (в приоритете `message.sender.user_id`).
 3. Отправляет ответ через MAX API методом `POST /messages`:
-   - `Ваш ID: {user_id}`
+   - если пользователь написал `test` или `тест` → `ПРИВЕТ`
+   - иначе → `Ваш ID: {user_id}`
 
 Если прямого `user_id` нет, бот пытается взять ID из альтернативных полей (`sender.id`, `user.user_id`, `profile.id` и т.д.).
 
@@ -97,6 +98,25 @@ curl -X POST "https://platform-api.max.ru/messages?user_id=123456789" \
 
 ---
 
+
+
+### Что указывать в `MAX_API_BASE_URL`
+
+Указывайте **базовый URL API MAX без завершающего `/`**.
+
+Обычно это:
+
+```env
+MAX_API_BASE_URL=https://platform-api.max.ru
+```
+
+То есть:
+- `https://platform-api.max.ru` ✅
+- `https://platform-api.max.ru/` ⚠️ (лучше без `/` в конце)
+- `https://dev.max.ru` ❌ (это портал документации, не API host)
+
+Если вы не зададите переменную, в коде уже используется значение по умолчанию: `https://platform-api.max.ru`.
+
 ## Настройка webhook в MAX
 
 1. Задеплойте приложение (например, Railway) и получите публичный URL.
@@ -127,6 +147,133 @@ curl -X POST "https://platform-api.max.ru/messages?user_id=123456789" \
 - Ошибки MAX API логируются, наружу отдаётся `502`.
 
 ---
+
+
+---
+
+
+## Как проверить регистрацию webhook на стороне MAX API
+
+> Важно: проверка делается на `platform-api.max.ru`, а не на вашем домене Railway.
+
+### 1) Посмотреть текущие подписки
+
+```bash
+curl -sS -X GET "https://platform-api.max.ru/subscriptions"   -H "Authorization: <MAX_BOT_TOKEN>"   -H "Content-Type: application/json"
+```
+
+Что должно быть в ответе:
+- есть запись с `url` = `https://<ваш-домен>/webhook`
+- в `update_types` присутствует минимум `message_created` (и при необходимости `bot_started`)
+
+### 2) Пересоздать подписку (если нет нужной или URL неверный)
+
+```bash
+curl -sS -X POST "https://platform-api.max.ru/subscriptions"   -H "Authorization: <MAX_BOT_TOKEN>"   -H "Content-Type: application/json"   -d '{
+    "url": "https://<ваш-домен>/webhook",
+    "update_types": ["message_created", "bot_started"]
+  }'
+```
+
+После этого снова выполните `GET /subscriptions` и убедитесь, что подписка появилась.
+
+### 3) Проверить, что MAX реально шлёт события
+
+- Напишите боту сообщение в MAX.
+- Откройте логи Railway: должен появиться `POST /webhook`.
+- Если в логах только `GET /webhook` или вообще нет обращений, MAX не доставляет webhook на ваш URL.
+
+## Шаблон запроса в техподдержку MAX
+
+Ниже готовый текст, который можно отправить почти без изменений:
+
+```text
+Тема: Не приходят webhook-события на URL бота MAX
+
+Здравствуйте.
+
+Бот: <имя_бота или bot_id>
+Дата/время проблемы (UTC): <YYYY-MM-DD HH:MM>
+Webhook URL: https://<ваш-домен>/webhook
+
+Описание:
+- Сервис доступен извне, /health возвращает 200.
+- В MAX API подписка создана и видна через GET /subscriptions.
+- В подписке указан URL: https://<ваш-домен>/webhook
+- update_types: ["message_created", "bot_started"]
+- При отправке сообщений боту POST-запросы на /webhook не приходят (по логам Railway).
+
+Что уже проверили:
+1) Токен валиден (сообщения через POST /messages отправляются успешно / или код ошибки: <код>).
+2) SSL-сертификат домена валиден.
+3) Повторно создавали подписку через POST /subscriptions.
+
+Просьба:
+Проверьте, пожалуйста, доставку webhook-событий для этого бота и сообщите, есть ли ошибки маршрутизации/доставки на стороне MAX.
+
+Дополнительно можем предоставить:
+- response от GET /subscriptions,
+- фрагменты логов Railway за период <время>,
+- correlation/request id (если есть).
+```
+
+## Как проверить, что бот реально связан с MAX (чеклист)
+
+Если бот «молчит» после деплоя на Railway, проверьте по шагам:
+
+1. **Проверка сервиса Railway**
+   - Откройте `https://<ваш-домен>/health` — должен вернуться JSON `{"status":"ok"}`.
+   - В логах Railway должны быть входящие запросы на `/webhook` после вашего сообщения боту.
+
+2. **Проверка, что webhook действительно подписан в MAX**
+
+```bash
+curl -X GET "https://platform-api.max.ru/subscriptions"   -H "Authorization: <MAX_BOT_TOKEN>"
+```
+
+В ответе должен быть ваш URL `https://<ваш-домен>/webhook`.
+
+Если подписки нет — создайте её:
+
+```bash
+curl -X POST "https://platform-api.max.ru/subscriptions"   -H "Authorization: <MAX_BOT_TOKEN>"   -H "Content-Type: application/json"   -d '{
+    "url": "https://<ваш-домен>/webhook",
+    "update_types": ["message_created", "bot_started"]
+  }'
+```
+
+3. **Проверка, что токен рабочий (бот может отправлять сообщения)**
+
+```bash
+curl -X POST "https://platform-api.max.ru/messages?user_id=<YOUR_USER_ID>"   -H "Authorization: <MAX_BOT_TOKEN>"   -H "Content-Type: application/json"   -d '{"text":"Проверка отправки из Railway"}'
+```
+
+Если этот запрос не проходит, проблема в токене/правах/ID, а не в webhook.
+
+4. **Проверка входящих событий без webhook (диагностика)**
+
+```bash
+curl -X GET "https://platform-api.max.ru/updates"   -H "Authorization: <MAX_BOT_TOKEN>"
+```
+
+Если здесь приходят события, но на `/webhook` ничего нет — проблема в подписке webhook (URL, SSL, доступность).
+
+
+### Что означают типовые логи Railway
+
+- `GET /` → `404` (раньше) или `200` (после добавления root endpoint) — это просто проверка браузером.
+- `GET /webhook` → `405 Method Not Allowed` означает, что endpoint живой, но ждёт **POST** (это нормально для webhook).
+- `GET /subscriptions` → `404` на вашем сервере — тоже нормально, потому что `/subscriptions` это метод **MAX API**, а не вашего FastAPI-приложения.
+
+Проверять подписки нужно запросом на `https://platform-api.max.ru/subscriptions`, а не на ваш домен Railway.
+
+### Частые причины, почему бот молчит
+
+- Не создана подписка `POST /subscriptions`.
+- Подписка создана, но без типа `message_created`.
+- Неверный `MAX_BOT_TOKEN` в Railway Variables.
+- Webhook URL недоступен извне или указан не тот путь (нужно ровно `/webhook`).
+- Вы пишете боту в чате, где у бота нет прав (для групп бот должен быть админом).
 
 ## Как это работает простыми словами
 

@@ -65,6 +65,20 @@ def extract_chat_id(payload: dict[str, Any]) -> Optional[str]:
     return str(chat_id) if chat_id is not None else None
 
 
+def extract_message_text(payload: dict[str, Any]) -> Optional[str]:
+    """Пробуем извлечь текст сообщения из разных вариантов структуры body."""
+    text_value = _extract_by_paths(
+        payload,
+        [
+            "message.body.text",
+            "message.text",
+            "body.text",
+            "text",
+        ],
+    )
+    return str(text_value) if text_value is not None else None
+
+
 def send_max_message(text: str, user_id: Optional[str] = None, chat_id: Optional[str] = None) -> dict[str, Any]:
     if not MAX_BOT_TOKEN:
         raise RuntimeError("MAX_BOT_TOKEN не задан в переменных окружения")
@@ -99,6 +113,27 @@ def send_max_message(text: str, user_id: Optional[str] = None, chat_id: Optional
     return response.json() if response.content else {"ok": True}
 
 
+
+@app.get("/")
+def root() -> dict[str, str]:
+    return {
+        "service": "max-id-bot",
+        "status": "ok",
+        "hint": "Use POST /webhook for MAX events",
+    }
+
+
+@app.get("/webhook")
+def webhook_get_hint() -> JSONResponse:
+    return JSONResponse(
+        status_code=200,
+        content={
+            "ok": True,
+            "message": "Webhook endpoint is alive. Send POST requests from MAX to /webhook.",
+        },
+    )
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -116,6 +151,12 @@ async def webhook(request: Request) -> JSONResponse:
 
     user_id = extract_user_id(payload)
     chat_id = extract_chat_id(payload)
+    message_text = (extract_message_text(payload) or "").strip().lower()
+
+    # Если пользователь написал "test" или "тест", отвечаем специальным сообщением.
+    if message_text in {"test", "тест"}:
+        send_result = send_max_message(text="ПРИВЕТ", user_id=user_id, chat_id=chat_id)
+        return JSONResponse({"ok": True, "reply": "ПРИВЕТ", "send_result": send_result})
 
     if not user_id:
         logger.warning("Не удалось извлечь user_id из события")
