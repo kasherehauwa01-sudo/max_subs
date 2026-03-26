@@ -224,7 +224,9 @@ curl -X GET "https://platform-api.max.ru/me"   -H "Authorization: <MAX_BOT_TOKEN
 ### 1) Посмотреть текущие подписки
 
 ```bash
-curl -sS -X GET "https://platform-api.max.ru/subscriptions"   -H "Authorization: <MAX_BOT_TOKEN>"   -H "Content-Type: application/json"
+curl -sS -X GET "https://platform-api.max.ru/subscriptions" \
+  -H "Authorization: <MAX_BOT_TOKEN>" \
+  -H "Content-Type: application/json"
 ```
 
 Что должно быть в ответе:
@@ -234,13 +236,54 @@ curl -sS -X GET "https://platform-api.max.ru/subscriptions"   -H "Authorization:
 ### 2) Пересоздать подписку (если нет нужной или URL неверный)
 
 ```bash
-curl -sS -X POST "https://platform-api.max.ru/subscriptions"   -H "Authorization: <MAX_BOT_TOKEN>"   -H "Content-Type: application/json"   -d '{
+curl -sS -X POST "https://platform-api.max.ru/subscriptions" \
+  -H "Authorization: <MAX_BOT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
     "url": "https://<ваш-домен>/webhook",
     "update_types": ["message_created", "bot_started"]
   }'
 ```
 
+### 2.1) Готовая команда именно под ваш Railway URL
+
+Ниже команда с вашим endpoint `https://maxsubs-production.up.railway.app/webhook`.
+
+```bash
+curl -X POST "https://platform-api.max.ru/subscriptions" \
+  -H "Authorization: <MAX_BOT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://maxsubs-production.up.railway.app/webhook"
+  }'
+```
+
+> Важно: не вставляйте реальный токен в README/скриншоты/чат с третьими лицами. Если токен уже утёк, его нужно перевыпустить в MAX.
+
 После этого снова выполните `GET /subscriptions` и убедитесь, что подписка появилась.
+
+
+### Регистрация подписки теперь есть и в коде бота
+
+Чтобы не делать `curl` вручную, в приложении добавлены:
+
+- `POST /setup/subscription` — сервер сам вызывает `POST https://platform-api.max.ru/subscriptions`.
+- опциональная автоподписка на старте приложения через `MAX_WEBHOOK_AUTO_REGISTER=true`.
+
+Нужные переменные окружения:
+
+```env
+MAX_WEBHOOK_URL=https://maxsubs-production.up.railway.app/webhook
+MAX_WEBHOOK_AUTO_REGISTER=true
+```
+
+Ручной вызов серверного endpoint:
+
+```bash
+curl -X POST "https://maxsubs-production.up.railway.app/setup/subscription"
+```
+
+> Endpoint использует `MAX_BOT_TOKEN` из окружения и не требует передавать токен в URL/теле запроса.
 
 ### 3) Проверить, что MAX реально шлёт события
 
@@ -257,7 +300,10 @@ curl -sS -X POST "https://platform-api.max.ru/subscriptions"   -H "Authorization
 Пример создания подписки с секретом:
 
 ```bash
-curl -X POST "https://platform-api.max.ru/subscriptions"   -H "Authorization: <MAX_BOT_TOKEN>"   -H "Content-Type: application/json"   -d '{
+curl -X POST "https://platform-api.max.ru/subscriptions" \
+  -H "Authorization: <MAX_BOT_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
     "url": "https://<ваш-домен>/webhook",
     "update_types": ["message_created", "bot_started"],
     "secret": "your_webhook_secret"

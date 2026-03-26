@@ -23,6 +23,8 @@ MAX_TIMEOUT_SECONDS = float(os.getenv("MAX_TIMEOUT_SECONDS", "10"))
 MAX_WEBHOOK_SECRET = os.getenv("MAX_WEBHOOK_SECRET")
 MAX_API_MAX_RETRIES = int(os.getenv("MAX_API_MAX_RETRIES", "5"))
 MAX_DEDUP_TTL_SECONDS = int(os.getenv("MAX_DEDUP_TTL_SECONDS", "3600"))
+MAX_WEBHOOK_URL = os.getenv("MAX_WEBHOOK_URL")
+MAX_WEBHOOK_AUTO_REGISTER = os.getenv("MAX_WEBHOOK_AUTO_REGISTER", "false").lower() in {"1", "true", "yes"}
 
 app = FastAPI(title="MAX ID Bot", version="1.2.0")
 
@@ -176,6 +178,51 @@ def check_max_auth() -> dict[str, Any]:
 
     return response.json() if response.content else {"ok": True}
 
+
+
+def register_webhook_subscription() -> dict[str, Any]:
+    if not MAX_BOT_TOKEN:
+        raise RuntimeError("MAX_BOT_TOKEN не задан в переменных окружения")
+    if not MAX_WEBHOOK_URL:
+        raise RuntimeError("MAX_WEBHOOK_URL не задан в переменных окружения")
+
+    payload: dict[str, Any] = {"url": MAX_WEBHOOK_URL}
+    if MAX_WEBHOOK_SECRET:
+        payload["secret"] = MAX_WEBHOOK_SECRET
+
+    response = requests.post(
+        f"{MAX_API_BASE_URL}/subscriptions",
+        headers={"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"},
+        json=payload,
+        timeout=MAX_TIMEOUT_SECONDS,
+    )
+
+    if response.status_code >= 400:
+        logger.error("MAX /subscriptions register failed %s: %s", response.status_code, response.text)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Не удалось зарегистрировать webhook в MAX: status={response.status_code}",
+        )
+
+    return response.json() if response.content else {"ok": True}
+
+
+@app.on_event("startup")
+def auto_register_webhook_on_startup() -> None:
+    if not MAX_WEBHOOK_AUTO_REGISTER:
+        return
+
+    try:
+        result = register_webhook_subscription()
+        logger.info("Webhook registration success on startup: %s", result)
+    except Exception as exc:
+        logger.exception("Webhook auto-registration failed on startup: %s", exc)
+
+
+@app.post("/setup/subscription")
+def setup_subscription() -> JSONResponse:
+    result = register_webhook_subscription()
+    return JSONResponse({"ok": True, "subscription": result})
 
 def process_update(payload: dict[str, Any]) -> None:
     dedup_key = extract_dedup_key(payload)
