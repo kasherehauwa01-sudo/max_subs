@@ -31,6 +31,7 @@ MAX_WEBHOOK_UPDATE_TYPES = [
 ]
 MAX_WEBHOOK_AUTO_REGISTER = os.getenv("MAX_WEBHOOK_AUTO_REGISTER", "false").lower() in {"1", "true", "yes"}
 MAX_STARTUP_SELF_CHECK = os.getenv("MAX_STARTUP_SELF_CHECK", "false").lower() in {"1", "true", "yes"}
+RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN")
 
 app = FastAPI(title="MAX ID Bot", version="1.2.0")
 
@@ -202,10 +203,13 @@ def check_max_auth() -> dict[str, Any]:
 def register_webhook_subscription() -> dict[str, Any]:
     if not MAX_BOT_TOKEN:
         raise RuntimeError("MAX_BOT_TOKEN не задан в переменных окружения")
-    if not MAX_WEBHOOK_URL:
-        raise RuntimeError("MAX_WEBHOOK_URL не задан в переменных окружения")
+    webhook_url = get_effective_webhook_url()
+    if not webhook_url:
+        raise RuntimeError(
+            "Webhook URL не определён. Задайте MAX_WEBHOOK_URL или RAILWAY_PUBLIC_DOMAIN."
+        )
 
-    payload: dict[str, Any] = {"url": MAX_WEBHOOK_URL, "update_types": MAX_WEBHOOK_UPDATE_TYPES}
+    payload: dict[str, Any] = {"url": webhook_url, "update_types": MAX_WEBHOOK_UPDATE_TYPES}
     if MAX_WEBHOOK_SECRET:
         payload["secret"] = MAX_WEBHOOK_SECRET
 
@@ -226,17 +230,36 @@ def register_webhook_subscription() -> dict[str, Any]:
     return response.json() if response.content else {"ok": True}
 
 
+def get_effective_webhook_url() -> Optional[str]:
+    """
+    Возвращает webhook URL в приоритете:
+    1) MAX_WEBHOOK_URL
+    2) RAILWAY_PUBLIC_DOMAIN -> https://<domain>/webhook
+    """
+    if MAX_WEBHOOK_URL:
+        return MAX_WEBHOOK_URL
+    if RAILWAY_PUBLIC_DOMAIN:
+        return f"https://{RAILWAY_PUBLIC_DOMAIN}/webhook"
+    return None
+
+
 @app.on_event("startup")
 def auto_register_webhook_on_startup() -> None:
+    effective_webhook_url = get_effective_webhook_url()
     logger.info(
-        "Startup config: token_set=%s webhook_url=%s auto_register=%s update_types=%s secret_set=%s self_check=%s",
+        "Startup config: token_set=%s webhook_url=%s effective_webhook_url=%s auto_register=%s update_types=%s secret_set=%s self_check=%s",
         bool(MAX_BOT_TOKEN),
         MAX_WEBHOOK_URL or "<empty>",
+        effective_webhook_url or "<empty>",
         MAX_WEBHOOK_AUTO_REGISTER,
         ",".join(MAX_WEBHOOK_UPDATE_TYPES) or "<empty>",
         bool(MAX_WEBHOOK_SECRET),
         MAX_STARTUP_SELF_CHECK,
     )
+    if not effective_webhook_url:
+        logger.warning(
+            "Webhook URL не задан. Укажите MAX_WEBHOOK_URL или включите Public Domain в Railway (RAILWAY_PUBLIC_DOMAIN)."
+        )
 
     if MAX_STARTUP_SELF_CHECK:
         try:
@@ -347,6 +370,13 @@ def health_max() -> JSONResponse:
 
 @app.get("/health/config")
 def health_config() -> JSONResponse:
+    effective_webhook_url = get_effective_webhook_url()
+    issues: list[str] = []
+    if not MAX_BOT_TOKEN:
+        issues.append("MAX_BOT_TOKEN is empty")
+    if not effective_webhook_url:
+        issues.append("webhook url is empty: set MAX_WEBHOOK_URL or RAILWAY_PUBLIC_DOMAIN")
+
     return JSONResponse(
         {
             "status": "ok",
@@ -354,10 +384,13 @@ def health_config() -> JSONResponse:
                 "max_api_base_url": MAX_API_BASE_URL,
                 "token_set": bool(MAX_BOT_TOKEN),
                 "webhook_url": MAX_WEBHOOK_URL,
+                "railway_public_domain": RAILWAY_PUBLIC_DOMAIN,
+                "effective_webhook_url": effective_webhook_url,
                 "webhook_secret_set": bool(MAX_WEBHOOK_SECRET),
                 "webhook_auto_register": MAX_WEBHOOK_AUTO_REGISTER,
                 "webhook_update_types": MAX_WEBHOOK_UPDATE_TYPES,
                 "startup_self_check": MAX_STARTUP_SELF_CHECK,
+                "issues": issues,
             },
         }
     )

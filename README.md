@@ -152,6 +152,8 @@ MAX_API_BASE_URL=https://platform-api.max.ru
   - `MAX_STARTUP_SELF_CHECK` (`true/false`, проверка `GET /me` при старте)
   - `LOG_LEVEL` (`INFO`)
 
+`MAX_WEBHOOK_URL` можно не задавать, если в Railway включён Public Domain: тогда приложение автоматически соберёт URL как `https://$RAILWAY_PUBLIC_DOMAIN/webhook`.
+
 ---
 
 
@@ -204,6 +206,9 @@ MAX_API_BASE_URL=https://platform-api.max.ru
 2. `MAX_WEBHOOK_URL=https://<ваш-домен>/webhook`.
 3. `MAX_WEBHOOK_UPDATE_TYPES` содержит `message_created`.
 4. `GET /health/config` показывает ожидаемые значения.
+
+Пример из логов:
+- `webhook_url=<empty> auto_register=False` означает, что URL webhook не задан и автоподписка отключена. В таком случае либо задайте `MAX_WEBHOOK_URL`, либо включите `MAX_WEBHOOK_AUTO_REGISTER=true` и Public Domain (чтобы появился `RAILWAY_PUBLIC_DOMAIN`).
 
 ## Обработка ошибок
 
