@@ -144,10 +144,52 @@ MAX_API_BASE_URL=https://platform-api.max.ru
   - `MAX_BOT_TOKEN`
   - `MAX_API_BASE_URL` (обычно `https://platform-api.max.ru`)
   - `MAX_TIMEOUT_SECONDS` (например, `10`)
+  - `MAX_API_MAX_RETRIES` (например, `5`, ретраи на 429/503/сеть)
   - `MAX_WEBHOOK_SECRET` (если указываете `secret` при создании подписки)
+  - `MAX_DEDUP_TTL_SECONDS` (например, `3600`, TTL dedup ключей)
   - `LOG_LEVEL` (`INFO`)
 
 ---
+
+
+### Обязательные настройки в Railway (чеклист)
+
+Чтобы в логах Railway начали появляться webhook-события от MAX, проверьте:
+
+1. **Публичный HTTPS-домен включён**
+   - В Railway должен быть выдан публичный домен вида `https://<app>.up.railway.app`.
+   - Бот MAX не сможет слать события на приватный/internal URL.
+
+2. **Переменные окружения заданы**
+   - `MAX_BOT_TOKEN=<токен из MAX>`
+   - `MAX_API_BASE_URL=https://platform-api.max.ru`
+   - `MAX_TIMEOUT_SECONDS=10`
+   - `LOG_LEVEL=INFO`
+   - `MAX_WEBHOOK_SECRET=<секрет>` (если использовали `secret` в `POST /subscriptions`)
+
+3. **Команда запуска корректная**
+   - Используется `Procfile`: `web: uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}`.
+   - Railway сам передаёт `PORT`, менять вручную обычно не нужно.
+
+4. **Проверка доступности из интернета**
+   - `GET https://<домен>/health` должен вернуть `200`.
+   - `GET https://<домен>/webhook` должен вернуть `200` (подсказка endpoint жив).
+   - `POST` от MAX должен приходить на `https://<домен>/webhook`.
+
+5. **Webhook в MAX указывает именно на Railway-домен**
+   - В подписке должен быть URL `https://<домен>/webhook` (ровно этот путь).
+
+6. **Если задан secret в подписке, он 1-в-1 совпадает с Railway переменной**
+   - `secret` из `POST /subscriptions` == `MAX_WEBHOOK_SECRET`.
+   - Любое расхождение → сервер вернёт `401`, событие не будет обработано.
+
+
+### Что уже сделано для production-устойчивости
+
+- **Fast ACK webhook**: endpoint `/webhook` быстро возвращает `200`, бизнес-логика выполняется в фоне.
+- **Проверка webhook secret**: при заданном `MAX_WEBHOOK_SECRET` проверяется заголовок `X-Max-Bot-Api-Secret`.
+- **Retry/backoff**: отправка сообщений в MAX API повторяется при `429` и `503` (а также сетевых сбоях) с экспоненциальной паузой и jitter.
+- **Dedup входящих событий**: повторно доставленные webhook события отфильтровываются по ключам `(update_type, mid)` или `(update_type, callback_id)`.
 
 ## Обработка ошибок
 

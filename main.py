@@ -2,6 +2,9 @@ import hmac
 import json
 import logging
 import os
+import random
+import threading
+import time
 from typing import Any, Optional
 
 import requests
@@ -18,12 +21,17 @@ MAX_API_BASE_URL = os.getenv("MAX_API_BASE_URL", "https://platform-api.max.ru")
 MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN")
 MAX_TIMEOUT_SECONDS = float(os.getenv("MAX_TIMEOUT_SECONDS", "10"))
 MAX_WEBHOOK_SECRET = os.getenv("MAX_WEBHOOK_SECRET")
+MAX_API_MAX_RETRIES = int(os.getenv("MAX_API_MAX_RETRIES", "5"))
+MAX_DEDUP_TTL_SECONDS = int(os.getenv("MAX_DEDUP_TTL_SECONDS", "3600"))
 
-app = FastAPI(title="MAX ID Bot", version="1.1.0")
+app = FastAPI(title="MAX ID Bot", version="1.2.0")
+
+# Простой in-memory dedup для повторной доставки webhook (at-least-once).
+_processed_updates: dict[str, float] = {}
+_dedup_lock = threading.Lock()
 
 
 def _extract_by_paths(payload: dict[str, Any], paths: list[str]) -> Optional[Any]:
-    """Возвращает первое непустое значение из списка путей вида a.b.c."""
     for path in paths:
         value: Any = payload
         for key in path.split("."):
@@ -38,7 +46,6 @@ def _extract_by_paths(payload: dict[str, Any], paths: list[str]) -> Optional[Any
 
 
 def extract_user_id(payload: dict[str, Any]) -> Optional[str]:
-    """Пытаемся достать наиболее уникальный идентификатор пользователя из события."""
     candidate_paths = [
         "message.sender.user_id",
         "message.sender.id",
@@ -56,7 +63,6 @@ def extract_user_id(payload: dict[str, Any]) -> Optional[str]:
 
 
 def extract_chat_id(payload: dict[str, Any]) -> Optional[str]:
-    """Извлекаем chat_id, если событие пришло из группового/диалогового чата."""
     candidate_paths = [
         "message.recipient.chat_id",
         "message.chat_id",
@@ -68,7 +74,6 @@ def extract_chat_id(payload: dict[str, Any]) -> Optional[str]:
 
 
 def extract_message_text(payload: dict[str, Any]) -> Optional[str]:
-    """Пробуем извлечь текст сообщения из разных вариантов структуры body."""
     text_value = _extract_by_paths(
         payload,
         [
@@ -81,36 +86,78 @@ def extract_message_text(payload: dict[str, Any]) -> Optional[str]:
     return str(text_value) if text_value is not None else None
 
 
+def extract_dedup_key(payload: dict[str, Any]) -> Optional[str]:
+    update_type = str(payload.get("update_type") or "unknown")
+    mid = _extract_by_paths(payload, ["message.body.mid", "message.mid", "mid"])
+    callback_id = _extract_by_paths(payload, ["callback.callback_id", "callback_id"])
+
+    if mid:
+        return f"{update_type}:mid:{mid}"
+    if callback_id:
+        return f"{update_type}:cb:{callback_id}"
+
+    # Фолбэк: если нет mid/callback_id, dedup не применяем.
+    return None
+
+
+def _sleep_backoff(attempt: int, base: float = 0.4, cap: float = 8.0) -> None:
+    delay = min(cap, base * (2**attempt))
+    delay *= 0.5 + random.random()
+    time.sleep(delay)
+
+
+def _is_duplicate_and_mark(key: str) -> bool:
+    now = time.time()
+    with _dedup_lock:
+        expired = [k for k, ts in _processed_updates.items() if now - ts > MAX_DEDUP_TTL_SECONDS]
+        for k in expired:
+            _processed_updates.pop(k, None)
+
+        if key in _processed_updates:
+            return True
+
+        _processed_updates[key] = now
+        return False
+
+
 def send_max_message(text: str, user_id: Optional[str] = None, chat_id: Optional[str] = None) -> dict[str, Any]:
     if not MAX_BOT_TOKEN:
         raise RuntimeError("MAX_BOT_TOKEN не задан в переменных окружения")
     if not user_id and not chat_id:
         raise ValueError("Нужен user_id или chat_id для отправки сообщения")
 
+    params: dict[str, str] = {"user_id": user_id} if user_id else {"chat_id": chat_id}  # type: ignore[arg-type]
     url = f"{MAX_API_BASE_URL}/messages"
-    params: dict[str, str] = {}
-    if user_id:
-        params["user_id"] = user_id
-    elif chat_id:
-        params["chat_id"] = chat_id
 
-    response = requests.post(
-        url,
-        params=params,
-        headers={"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"},
-        json={"text": text},
-        timeout=MAX_TIMEOUT_SECONDS,
-    )
+    last_error: Optional[str] = None
+    for attempt in range(MAX_API_MAX_RETRIES):
+        try:
+            response = requests.post(
+                url,
+                params=params,
+                headers={"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"},
+                json={"text": text},
+                timeout=MAX_TIMEOUT_SECONDS,
+            )
 
-    if response.status_code >= 400:
-        logger.error("MAX API error %s: %s", response.status_code, response.text)
-        raise HTTPException(status_code=502, detail="Ошибка отправки сообщения через MAX API")
+            if response.status_code in (429, 503):
+                last_error = f"retryable status={response.status_code}"
+                _sleep_backoff(attempt)
+                continue
 
-    return response.json() if response.content else {"ok": True}
+            if response.status_code >= 400:
+                logger.error("MAX API error %s: %s", response.status_code, response.text)
+                raise HTTPException(status_code=502, detail="Ошибка отправки сообщения через MAX API")
+
+            return response.json() if response.content else {"ok": True}
+        except requests.RequestException as exc:
+            last_error = str(exc)
+            _sleep_backoff(attempt)
+
+    raise HTTPException(status_code=502, detail=f"MAX API недоступен после ретраев: {last_error}")
 
 
 def check_max_auth() -> dict[str, Any]:
-    """Проверяет, что токен валиден и MAX API доступен (GET /me)."""
     if not MAX_BOT_TOKEN:
         raise RuntimeError("MAX_BOT_TOKEN не задан в переменных окружения")
 
@@ -131,7 +178,11 @@ def check_max_auth() -> dict[str, Any]:
 
 
 def process_update(payload: dict[str, Any]) -> None:
-    """Бизнес-логика события (в фоне), чтобы /webhook быстро отдавал 200."""
+    dedup_key = extract_dedup_key(payload)
+    if dedup_key and _is_duplicate_and_mark(dedup_key):
+        logger.info("Skip duplicate update: %s", dedup_key)
+        return
+
     user_id = extract_user_id(payload)
     chat_id = extract_chat_id(payload)
     message_text = (extract_message_text(payload) or "").strip().lower()
@@ -160,21 +211,14 @@ def process_update(payload: dict[str, Any]) -> None:
 
 @app.get("/")
 def root() -> dict[str, str]:
-    return {
-        "service": "max-id-bot",
-        "status": "ok",
-        "hint": "Use POST /webhook for MAX events",
-    }
+    return {"service": "max-id-bot", "status": "ok", "hint": "Use POST /webhook for MAX events"}
 
 
 @app.get("/webhook")
 def webhook_get_hint() -> JSONResponse:
     return JSONResponse(
         status_code=200,
-        content={
-            "ok": True,
-            "message": "Webhook endpoint is alive. Send POST requests from MAX to /webhook.",
-        },
+        content={"ok": True, "message": "Webhook endpoint is alive. Send POST requests from MAX to /webhook."},
     )
 
 
