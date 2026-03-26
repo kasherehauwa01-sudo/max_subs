@@ -149,6 +149,7 @@ MAX_API_BASE_URL=https://platform-api.max.ru
   - `MAX_WEBHOOK_SECRET` (если указываете `secret` при создании подписки)
   - `MAX_DEDUP_TTL_SECONDS` (например, `3600`, TTL dedup ключей)
   - `MAX_WEBHOOK_UPDATE_TYPES` (например, `message_created,bot_started,message_callback`)
+  - `MAX_STARTUP_SELF_CHECK` (`true/false`, проверка `GET /me` при старте)
   - `LOG_LEVEL` (`INFO`)
 
 ---
@@ -175,6 +176,7 @@ MAX_API_BASE_URL=https://platform-api.max.ru
 
 4. **Проверка доступности из интернета**
    - `GET https://<домен>/health` должен вернуть `200`.
+   - `GET https://<домен>/health/config` должен вернуть активные настройки (без токена).
    - `GET https://<домен>/webhook` должен вернуть `200` (подсказка endpoint жив).
    - `POST` от MAX должен приходить на `https://<домен>/webhook`.
 
@@ -192,6 +194,16 @@ MAX_API_BASE_URL=https://platform-api.max.ru
 - **Проверка webhook secret**: при заданном `MAX_WEBHOOK_SECRET` проверяется заголовок `X-Max-Bot-Api-Secret`.
 - **Retry/backoff**: отправка сообщений в MAX API повторяется при `429` и `503` (а также сетевых сбоях) с экспоненциальной паузой и jitter.
 - **Dedup входящих событий**: повторно доставленные webhook события отфильтровываются по ключам `(update_type, mid)` или `(update_type, callback_id)`.
+- **Startup-диагностика**: на старте пишется сводка по env (`token_set`, `webhook_url`, `auto_register`, `update_types`), а при `MAX_STARTUP_SELF_CHECK=true` выполняется `GET /me` и результат пишется в лог.
+
+### Быстрая диагностика, если в логах только Startup
+
+Если в Railway видно только строки запуска (`Application startup complete`, `Uvicorn running...`) и нет `POST /webhook`, то обычно webhook ещё не доставляется из MAX. Проверьте:
+
+1. `MAX_WEBHOOK_AUTO_REGISTER=true` (или вручную вызовите `POST /setup/subscription`).
+2. `MAX_WEBHOOK_URL=https://<ваш-домен>/webhook`.
+3. `MAX_WEBHOOK_UPDATE_TYPES` содержит `message_created`.
+4. `GET /health/config` показывает ожидаемые значения.
 
 ## Обработка ошибок
 

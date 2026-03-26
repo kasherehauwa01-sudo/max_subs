@@ -30,6 +30,7 @@ MAX_WEBHOOK_UPDATE_TYPES = [
     if item.strip()
 ]
 MAX_WEBHOOK_AUTO_REGISTER = os.getenv("MAX_WEBHOOK_AUTO_REGISTER", "false").lower() in {"1", "true", "yes"}
+MAX_STARTUP_SELF_CHECK = os.getenv("MAX_STARTUP_SELF_CHECK", "false").lower() in {"1", "true", "yes"}
 
 app = FastAPI(title="MAX ID Bot", version="1.2.0")
 
@@ -227,7 +228,25 @@ def register_webhook_subscription() -> dict[str, Any]:
 
 @app.on_event("startup")
 def auto_register_webhook_on_startup() -> None:
+    logger.info(
+        "Startup config: token_set=%s webhook_url=%s auto_register=%s update_types=%s secret_set=%s self_check=%s",
+        bool(MAX_BOT_TOKEN),
+        MAX_WEBHOOK_URL or "<empty>",
+        MAX_WEBHOOK_AUTO_REGISTER,
+        ",".join(MAX_WEBHOOK_UPDATE_TYPES) or "<empty>",
+        bool(MAX_WEBHOOK_SECRET),
+        MAX_STARTUP_SELF_CHECK,
+    )
+
+    if MAX_STARTUP_SELF_CHECK:
+        try:
+            me = check_max_auth()
+            logger.info("Startup MAX /me check OK: %s", json.dumps(me, ensure_ascii=False))
+        except Exception as exc:
+            logger.exception("Startup MAX /me check failed: %s", exc)
+
     if not MAX_WEBHOOK_AUTO_REGISTER:
+        logger.info("Webhook auto-registration skipped: MAX_WEBHOOK_AUTO_REGISTER=false")
         return
 
     try:
@@ -324,6 +343,24 @@ def health() -> dict[str, str]:
 def health_max() -> JSONResponse:
     me = check_max_auth()
     return JSONResponse({"status": "ok", "max_auth": True, "me": me})
+
+
+@app.get("/health/config")
+def health_config() -> JSONResponse:
+    return JSONResponse(
+        {
+            "status": "ok",
+            "config": {
+                "max_api_base_url": MAX_API_BASE_URL,
+                "token_set": bool(MAX_BOT_TOKEN),
+                "webhook_url": MAX_WEBHOOK_URL,
+                "webhook_secret_set": bool(MAX_WEBHOOK_SECRET),
+                "webhook_auto_register": MAX_WEBHOOK_AUTO_REGISTER,
+                "webhook_update_types": MAX_WEBHOOK_UPDATE_TYPES,
+                "startup_self_check": MAX_STARTUP_SELF_CHECK,
+            },
+        }
+    )
 
 
 @app.post("/webhook")
