@@ -24,6 +24,11 @@ MAX_WEBHOOK_SECRET = os.getenv("MAX_WEBHOOK_SECRET")
 MAX_API_MAX_RETRIES = int(os.getenv("MAX_API_MAX_RETRIES", "5"))
 MAX_DEDUP_TTL_SECONDS = int(os.getenv("MAX_DEDUP_TTL_SECONDS", "3600"))
 MAX_WEBHOOK_URL = os.getenv("MAX_WEBHOOK_URL")
+MAX_WEBHOOK_UPDATE_TYPES = [
+    item.strip()
+    for item in os.getenv("MAX_WEBHOOK_UPDATE_TYPES", "message_created,bot_started,message_callback").split(",")
+    if item.strip()
+]
 MAX_WEBHOOK_AUTO_REGISTER = os.getenv("MAX_WEBHOOK_AUTO_REGISTER", "false").lower() in {"1", "true", "yes"}
 
 app = FastAPI(title="MAX ID Bot", version="1.2.0")
@@ -86,6 +91,19 @@ def extract_message_text(payload: dict[str, Any]) -> Optional[str]:
         ],
     )
     return str(text_value) if text_value is not None else None
+
+
+def normalize_incoming_text(raw_text: str) -> str:
+    """
+    Нормализует входной текст:
+    - trim;
+    - lower;
+    - убирает упоминание бота в командах вида '/id@my_bot'.
+    """
+    text = raw_text.strip().lower()
+    if text.startswith("/") and "@" in text:
+        text = text.split("@", 1)[0]
+    return text
 
 
 def extract_dedup_key(payload: dict[str, Any]) -> Optional[str]:
@@ -186,7 +204,7 @@ def register_webhook_subscription() -> dict[str, Any]:
     if not MAX_WEBHOOK_URL:
         raise RuntimeError("MAX_WEBHOOK_URL не задан в переменных окружения")
 
-    payload: dict[str, Any] = {"url": MAX_WEBHOOK_URL}
+    payload: dict[str, Any] = {"url": MAX_WEBHOOK_URL, "update_types": MAX_WEBHOOK_UPDATE_TYPES}
     if MAX_WEBHOOK_SECRET:
         payload["secret"] = MAX_WEBHOOK_SECRET
 
@@ -239,6 +257,11 @@ def subscribe_post() -> JSONResponse:
     return JSONResponse({"ok": True, "subscription": result, "hint": "Webhook subscription registered via POST /subscribe"})
 
 def process_update(payload: dict[str, Any]) -> None:
+    update_type = str(payload.get("update_type") or "")
+    if update_type and update_type not in {"message_created", "bot_started"}:
+        logger.info("Skip unsupported update_type=%s", update_type)
+        return
+
     dedup_key = extract_dedup_key(payload)
     if dedup_key and _is_duplicate_and_mark(dedup_key):
         logger.info("Skip duplicate update: %s", dedup_key)
@@ -246,11 +269,20 @@ def process_update(payload: dict[str, Any]) -> None:
 
     user_id = extract_user_id(payload)
     chat_id = extract_chat_id(payload)
-    message_text = (extract_message_text(payload) or "").strip().lower()
+    message_text = normalize_incoming_text(extract_message_text(payload) or "")
 
     try:
-        if message_text in {"test", "тест"}:
+        if message_text in {"test", "тест", "/test", "/hello", "/start"}:
             send_max_message(text="ПРИВЕТ", user_id=user_id, chat_id=chat_id)
+            return
+        if message_text in {"id", "айди", "/id"}:
+            if user_id:
+                send_max_message(text=f"Ваш ID: {user_id}", user_id=user_id, chat_id=chat_id)
+            elif chat_id:
+                send_max_message(
+                    text="Не удалось извлечь user_id. Ваш chat_id: " + chat_id,
+                    chat_id=chat_id,
+                )
             return
 
         if not user_id:

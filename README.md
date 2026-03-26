@@ -7,7 +7,8 @@
 1. Получает POST-событие от MAX на `POST /webhook`.
 2. Извлекает идентификатор пользователя из полей события (в приоритете `message.sender.user_id`).
 3. Отправляет ответ через MAX API методом `POST /messages`:
-   - если пользователь написал `test` или `тест` → `ПРИВЕТ`
+   - если пользователь написал `test`, `тест`, `/test`, `/hello` или `/start` → `ПРИВЕТ`
+   - если пользователь написал `id`, `айди` или `/id` → `Ваш ID: {user_id}`
    - иначе → `Ваш ID: {user_id}`
 
 Если прямого `user_id` нет, бот пытается взять ID из альтернативных полей (`sender.id`, `user.user_id`, `profile.id` и т.д.).
@@ -147,6 +148,7 @@ MAX_API_BASE_URL=https://platform-api.max.ru
   - `MAX_API_MAX_RETRIES` (например, `5`, ретраи на 429/503/сеть)
   - `MAX_WEBHOOK_SECRET` (если указываете `secret` при создании подписки)
   - `MAX_DEDUP_TTL_SECONDS` (например, `3600`, TTL dedup ключей)
+  - `MAX_WEBHOOK_UPDATE_TYPES` (например, `message_created,bot_started,message_callback`)
   - `LOG_LEVEL` (`INFO`)
 
 ---
