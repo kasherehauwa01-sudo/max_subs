@@ -283,15 +283,19 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
             image_path = generate_ean13_png_file(barcode_value, Path(tmp_dir))
             token = upload_image_and_get_token(image_path)
             send_max_message(
-                text=f"{coupon_text}\n\nШтрихкод: {barcode_value}",
+                text=coupon_text,
                 user_id=user_id,
                 chat_id=chat_id,
                 attachments=[{"type": "image", "payload": {"token": token}}],
             )
     except Exception as exc:
-        logger.exception("Не удалось отправить изображение купона, отправляем текстовый fallback: %s", exc)
+        logger.exception("Не удалось отправить изображение купона, отправляем fallback без цифрового кода: %s", exc)
         send_max_message(
-            text=f"{coupon_text}\n\nШтрихкод: {barcode_value}",
+            text=(
+                f"{coupon_text}\n\n"
+                "⚠️ Сейчас не удалось прикрепить изображение штрихкода. "
+                "Попробуйте запросить купон ещё раз через минуту."
+            ),
             user_id=user_id,
             chat_id=chat_id,
         )
