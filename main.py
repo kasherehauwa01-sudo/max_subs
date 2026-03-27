@@ -187,7 +187,7 @@ def build_coupon_text(expiry_date: date) -> str:
     expiry_str = expiry_date.strftime("%d.%m.%Y")
     return (
         "Спасибо, что подписались 💛\n"
-        "Дарим вам скидку на первую покупку — просто используйте этот купон при оформлении заказа.\n\n"
+        "Дарим вам скидку на первую покупку.\n"
         "🛍 Покажите штрихкод на кассе и покупайте с выгодой\n\n"
         f"⏳ Купон действует до {expiry_str}"
     )
@@ -203,7 +203,14 @@ def generate_ean13_png_file(barcode_value: str, output_dir: Path) -> Path:
 
     filename = output_dir / "coupon_ean13"
     ean = EAN13(barcode_value, writer=ImageWriter())
-    saved_path = Path(ean.save(str(filename)))
+    saved_path = Path(
+        ean.save(
+            str(filename),
+            options={
+                "write_text": False,
+            },
+        )
+    )
     return saved_path
 
 

@@ -46,6 +46,8 @@ class TestMainHelpers(unittest.TestCase):
     def test_coupon_text_contains_expiry(self) -> None:
         text = main.build_coupon_text(date(2026, 3, 20))
         self.assertIn("⏳ Купон действует до 20.03.2026", text)
+        self.assertIn("Дарим вам скидку на первую покупку.", text)
+        self.assertNotIn("просто используйте этот купон", text)
 
     def test_extract_attachment_token_recursive(self) -> None:
         payload = {"result": [{"meta": {"token": "img_token_123"}}]}
