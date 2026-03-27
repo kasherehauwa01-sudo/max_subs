@@ -53,18 +53,10 @@ class TestMainHelpers(unittest.TestCase):
         payload = {"result": [{"meta": {"token": "img_token_123"}}]}
         self.assertEqual(main._extract_attachment_token(payload), "img_token_123")
 
-    def test_extract_new_member_user_id_direct(self) -> None:
-        payload = {"new_member": {"user_id": 555001}}
-        self.assertEqual(main.extract_new_member_user_id(payload), "555001")
-
-    def test_extract_new_member_user_id_from_list(self) -> None:
-        payload = {"members": [{"id": 777002}]}
-        self.assertEqual(main.extract_new_member_user_id(payload), "777002")
-
-    def test_effective_update_types_contains_member_types_by_default(self) -> None:
+    def test_effective_update_types_contains_base_types(self) -> None:
         update_types = main.get_effective_update_types()
         self.assertIn("message_created", update_types)
-        self.assertIn("chat_member_added", update_types)
+        self.assertIn("bot_started", update_types)
 
 if __name__ == "__main__":
     unittest.main()

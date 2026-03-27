@@ -15,7 +15,7 @@ from typing import Any, Optional
 import requests
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -35,18 +35,11 @@ BASE_WEBHOOK_UPDATE_TYPES = [
     for item in os.getenv("MAX_WEBHOOK_UPDATE_TYPES", "message_created,bot_started,message_callback").split(",")
     if item.strip()
 ]
-MEMBER_JOIN_UPDATE_TYPES = [
-    "chat_member_added",
-    "chat_members_added",
-    "member_joined",
-    "channel_subscriber_added",
-    "channel_member_added",
-    "user_added_to_chat",
-]
-MAX_ENABLE_MEMBER_AUTO_COUPON = os.getenv("MAX_ENABLE_MEMBER_AUTO_COUPON", "true").lower() in {"1", "true", "yes"}
 MAX_WEBHOOK_AUTO_REGISTER = os.getenv("MAX_WEBHOOK_AUTO_REGISTER", "true").lower() in {"1", "true", "yes"}
 MAX_STARTUP_SELF_CHECK = os.getenv("MAX_STARTUP_SELF_CHECK", "false").lower() in {"1", "true", "yes"}
 RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+MAX_CHANNEL_CHAT_ID = os.getenv("MAX_CHANNEL_CHAT_ID", "208470348")
+MAX_CHANNEL_URL = os.getenv("MAX_CHANNEL_URL", f"max://chat/{MAX_CHANNEL_CHAT_ID}")
 ACTIVE_WEBHOOK_UPDATE_TYPES: list[str] = []
 
 def _find_token_recursive(value: Any) -> Optional[str]:
@@ -126,47 +119,6 @@ def extract_message_text(payload: dict[str, Any]) -> Optional[str]:
         ],
     )
     return str(text_value) if text_value is not None else None
-
-
-def extract_new_member_user_id(payload: dict[str, Any]) -> Optional[str]:
-    """
-    Пытается извлечь user_id нового подписчика/участника
-    из событий каналов/чатов/групп.
-    """
-    user_id = _extract_by_paths(
-        payload,
-        [
-            "member.user_id",
-            "member.id",
-            "new_member.user_id",
-            "new_member.id",
-            "chat_member.user_id",
-            "chat_member.id",
-            "subscriber.user_id",
-            "subscriber.id",
-            "event.member.user_id",
-            "event.member.id",
-        ],
-    )
-    if user_id is not None:
-        return str(user_id)
-
-    members = _extract_by_paths(
-        payload,
-        [
-            "members",
-            "new_members",
-            "chat_members",
-            "subscribers",
-        ],
-    )
-    if isinstance(members, list):
-        for item in members:
-            if isinstance(item, dict):
-                candidate = item.get("user_id") or item.get("id")
-                if candidate not in (None, ""):
-                    return str(candidate)
-    return None
 
 
 def normalize_incoming_text(raw_text: str) -> str:
@@ -399,6 +351,90 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
         )
 
 
+def get_miniapp_url() -> Optional[str]:
+    base_url = os.getenv("PUBLIC_BASE_URL")
+    if base_url:
+        return f"{base_url.rstrip('/')}/miniapp"
+    webhook_url = get_effective_webhook_url()
+    if webhook_url:
+        return webhook_url.removesuffix("/webhook") + "/miniapp"
+    return None
+
+
+def build_miniapp_button_attachments() -> list[dict[str, Any]]:
+    miniapp_url = get_miniapp_url()
+    if not miniapp_url:
+        return []
+    return [
+        {
+            "type": "inline_keyboard",
+            "payload": {
+                "buttons": [
+                    [
+                        {
+                            "type": "open_app",
+                            "text": "Получить купон",
+                            "url": miniapp_url,
+                        }
+                    ]
+                ]
+            },
+        }
+    ]
+
+
+def send_miniapp_entry(user_id: Optional[str], chat_id: Optional[str]) -> None:
+    send_max_message(
+        text="Откройте миниприложение и нажмите «Получить купон».",
+        user_id=user_id,
+        chat_id=chat_id,
+        attachments=build_miniapp_button_attachments(),
+    )
+
+
+def is_user_subscribed_to_channel(user_id: str) -> bool:
+    if not MAX_BOT_TOKEN:
+        raise RuntimeError("MAX_BOT_TOKEN не задан в переменных окружения")
+
+    candidates = [
+        f"{MAX_API_BASE_URL}/chats/{MAX_CHANNEL_CHAT_ID}/members/{user_id}",
+        f"{MAX_API_BASE_URL}/chats/{MAX_CHANNEL_CHAT_ID}/members",
+    ]
+    headers = {"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"}
+
+    for url in candidates:
+        try:
+            params = {"user_id": user_id} if url.endswith("/members") else None
+            resp = requests.get(url, params=params, headers=headers, timeout=MAX_TIMEOUT_SECONDS)
+            if resp.status_code == 404:
+                continue
+            if resp.status_code >= 400:
+                continue
+            payload = resp.json() if resp.content else {}
+            # Пробуем определить membership из распространённых структур.
+            if isinstance(payload, dict):
+                if payload.get("user_id") == int(user_id) or payload.get("user_id") == user_id:
+                    return True
+                if payload.get("id") == int(user_id) or payload.get("id") == user_id:
+                    return True
+                members = payload.get("members") or payload.get("items") or payload.get("data")
+                if isinstance(members, list):
+                    for member in members:
+                        if isinstance(member, dict):
+                            member_id = member.get("user_id") or member.get("id")
+                            if str(member_id) == str(user_id):
+                                return True
+            if isinstance(payload, list):
+                for member in payload:
+                    if isinstance(member, dict):
+                        member_id = member.get("user_id") or member.get("id")
+                        if str(member_id) == str(user_id):
+                            return True
+        except Exception:
+            continue
+    return False
+
+
 def check_max_auth() -> dict[str, Any]:
     if not MAX_BOT_TOKEN:
         raise RuntimeError("MAX_BOT_TOKEN не задан в переменных окружения")
@@ -447,36 +483,6 @@ def register_webhook_subscription() -> dict[str, Any]:
         ACTIVE_WEBHOOK_UPDATE_TYPES.extend(effective_update_types)
         return response.json() if response.content else {"ok": True}
 
-    if MAX_ENABLE_MEMBER_AUTO_COUPON:
-        accepted_member_types: list[str] = []
-        for member_type in MEMBER_JOIN_UPDATE_TYPES:
-            trial_types = [*BASE_WEBHOOK_UPDATE_TYPES, member_type]
-            trial_response = _register_with_types(trial_types)
-            if trial_response.status_code < 400:
-                accepted_member_types.append(member_type)
-
-        if accepted_member_types:
-            final_types = [*BASE_WEBHOOK_UPDATE_TYPES, *accepted_member_types]
-            final_response = _register_with_types(final_types)
-            if final_response.status_code < 400:
-                ACTIVE_WEBHOOK_UPDATE_TYPES.clear()
-                ACTIVE_WEBHOOK_UPDATE_TYPES.extend(final_types)
-                logger.warning(
-                    "Some member update types are unsupported. Registered with partial member types: %s",
-                    ",".join(accepted_member_types),
-                )
-                return final_response.json() if final_response.content else {"ok": True}
-
-        fallback_response = _register_with_types(BASE_WEBHOOK_UPDATE_TYPES)
-        if fallback_response.status_code < 400:
-            ACTIVE_WEBHOOK_UPDATE_TYPES.clear()
-            ACTIVE_WEBHOOK_UPDATE_TYPES.extend(BASE_WEBHOOK_UPDATE_TYPES)
-            logger.warning(
-                "No supported member update types detected. Registered with base update types only: %s",
-                ",".join(BASE_WEBHOOK_UPDATE_TYPES),
-            )
-            return fallback_response.json() if fallback_response.content else {"ok": True}
-
     logger.error("MAX /subscriptions register failed %s: %s", response.status_code, response.text)
     raise HTTPException(
         status_code=502,
@@ -498,14 +504,7 @@ def get_effective_webhook_url() -> Optional[str]:
 
 
 def get_effective_update_types() -> list[str]:
-    if not MAX_ENABLE_MEMBER_AUTO_COUPON:
-        return BASE_WEBHOOK_UPDATE_TYPES
-
-    combined: list[str] = []
-    for update_type in [*BASE_WEBHOOK_UPDATE_TYPES, *MEMBER_JOIN_UPDATE_TYPES]:
-        if update_type not in combined:
-            combined.append(update_type)
-    return combined
+    return BASE_WEBHOOK_UPDATE_TYPES
 
 
 def auto_register_webhook_on_startup() -> None:
@@ -573,8 +572,7 @@ def subscribe_post() -> JSONResponse:
 
 def process_update(payload: dict[str, Any]) -> None:
     update_type = str(payload.get("update_type") or "")
-    member_join_update_types = set(MEMBER_JOIN_UPDATE_TYPES)
-    if update_type and update_type not in {"message_created", "bot_started", *member_join_update_types}:
+    if update_type and update_type not in {"message_created", "bot_started"}:
         logger.info("Skip unsupported update_type=%s", update_type)
         return
 
@@ -586,22 +584,13 @@ def process_update(payload: dict[str, Any]) -> None:
     user_id = extract_user_id(payload)
     chat_id = extract_chat_id(payload)
     message_text = normalize_incoming_text(extract_message_text(payload) or "")
-    new_member_user_id = extract_new_member_user_id(payload)
 
     try:
-        if update_type in member_join_update_types or (new_member_user_id and update_type != "message_created"):
-            # Событие нового подписчика/участника: отправляем купон в личку новому пользователю.
-            if not new_member_user_id:
-                logger.warning("Событие подписки пришло без user_id нового участника: %s", update_type)
-                return
-            send_coupon(user_id=new_member_user_id, chat_id=None)
-            return
-
         if message_text in {"test", "тест", "/test", "/hello", "/start"}:
-            send_max_message(text="ПРИВЕТ", user_id=user_id, chat_id=chat_id)
+            send_miniapp_entry(user_id=user_id, chat_id=chat_id)
             return
         if message_text in {"купон", "/купон", "coupon", "/coupon"}:
-            send_coupon(user_id=user_id, chat_id=chat_id)
+            send_miniapp_entry(user_id=user_id, chat_id=chat_id)
             return
         if message_text in {"id", "айди", "/id"}:
             if user_id:
@@ -676,7 +665,6 @@ def health_config() -> JSONResponse:
                 "webhook_auto_register": MAX_WEBHOOK_AUTO_REGISTER,
                 "webhook_update_types": get_effective_update_types(),
                 "active_webhook_update_types": ACTIVE_WEBHOOK_UPDATE_TYPES,
-                "member_auto_coupon_enabled": MAX_ENABLE_MEMBER_AUTO_COUPON,
                 "startup_self_check": MAX_STARTUP_SELF_CHECK,
                 "issues": issues,
             },
@@ -705,6 +693,69 @@ async def webhook(
 
     background_tasks.add_task(process_update, payload)
     return JSONResponse({"ok": True, "accepted": True})
+
+
+@app.get("/miniapp", response_class=HTMLResponse)
+def miniapp_page() -> str:
+    return f"""
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Купон</title>
+  </head>
+  <body style="font-family: sans-serif; max-width: 480px; margin: 24px auto; padding: 0 12px;">
+    <h3>Купон на скидку</h3>
+    <p>Введите ваш user_id из MAX, чтобы проверить подписку.</p>
+    <input id="userId" placeholder="user_id" style="width:100%;padding:10px;" />
+    <div style="margin-top: 12px;">
+      <button id="checkBtn" style="padding:10px 14px;">Проверить подписку</button>
+    </div>
+    <div style="margin-top: 16px;" id="actions"></div>
+    <script>
+      const actions = document.getElementById('actions');
+      document.getElementById('checkBtn').onclick = async () => {{
+        const userId = document.getElementById('userId').value.trim();
+        if (!userId) return;
+        const res = await fetch(`/miniapp/status?user_id=${{encodeURIComponent(userId)}}`);
+        const data = await res.json();
+        if (data.subscribed) {{
+          actions.innerHTML = `<button id="couponBtn" style="padding:10px 14px;">Получить купон</button>`;
+          document.getElementById('couponBtn').onclick = async () => {{
+            await fetch('/miniapp/get-coupon', {{
+              method: 'POST',
+              headers: {{ 'Content-Type': 'application/json' }},
+              body: JSON.stringify({{ user_id: userId }})
+            }});
+            actions.innerHTML += `<p>Купон отправлен в чат с ботом ✅</p>`;
+          }};
+        }} else {{
+          actions.innerHTML = `<a href="{MAX_CHANNEL_URL}" target="_blank"><button style="padding:10px 14px;">Подписаться на канал</button></a>`;
+        }}
+      }};
+    </script>
+  </body>
+</html>
+"""
+
+
+@app.get("/miniapp/status")
+def miniapp_status(user_id: str) -> JSONResponse:
+    subscribed = is_user_subscribed_to_channel(user_id=user_id)
+    return JSONResponse({"ok": True, "user_id": user_id, "subscribed": subscribed, "channel_chat_id": MAX_CHANNEL_CHAT_ID})
+
+
+@app.post("/miniapp/get-coupon")
+async def miniapp_get_coupon(request: Request) -> JSONResponse:
+    body = await request.json()
+    user_id = str(body.get("user_id") or "")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id обязателен")
+    if not is_user_subscribed_to_channel(user_id=user_id):
+        return JSONResponse({"ok": False, "reason": "not_subscribed", "channel_chat_id": MAX_CHANNEL_CHAT_ID}, status_code=403)
+    send_coupon(user_id=user_id, chat_id=None)
+    return JSONResponse({"ok": True, "sent": True})
 
 
 def run() -> None:
