@@ -53,6 +53,14 @@ class TestMainHelpers(unittest.TestCase):
         payload = {"result": [{"meta": {"token": "img_token_123"}}]}
         self.assertEqual(main._extract_attachment_token(payload), "img_token_123")
 
+    def test_extract_new_member_user_id_direct(self) -> None:
+        payload = {"new_member": {"user_id": 555001}}
+        self.assertEqual(main.extract_new_member_user_id(payload), "555001")
+
+    def test_extract_new_member_user_id_from_list(self) -> None:
+        payload = {"members": [{"id": 777002}]}
+        self.assertEqual(main.extract_new_member_user_id(payload), "777002")
+
 
 if __name__ == "__main__":
     unittest.main()

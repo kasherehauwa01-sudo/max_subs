@@ -118,6 +118,47 @@ def extract_message_text(payload: dict[str, Any]) -> Optional[str]:
     return str(text_value) if text_value is not None else None
 
 
+def extract_new_member_user_id(payload: dict[str, Any]) -> Optional[str]:
+    """
+    Пытается извлечь user_id нового подписчика/участника
+    из событий каналов/чатов/групп.
+    """
+    user_id = _extract_by_paths(
+        payload,
+        [
+            "member.user_id",
+            "member.id",
+            "new_member.user_id",
+            "new_member.id",
+            "chat_member.user_id",
+            "chat_member.id",
+            "subscriber.user_id",
+            "subscriber.id",
+            "event.member.user_id",
+            "event.member.id",
+        ],
+    )
+    if user_id is not None:
+        return str(user_id)
+
+    members = _extract_by_paths(
+        payload,
+        [
+            "members",
+            "new_members",
+            "chat_members",
+            "subscribers",
+        ],
+    )
+    if isinstance(members, list):
+        for item in members:
+            if isinstance(item, dict):
+                candidate = item.get("user_id") or item.get("id")
+                if candidate not in (None, ""):
+                    return str(candidate)
+    return None
+
+
 def normalize_incoming_text(raw_text: str) -> str:
     """
     Нормализует входной текст:
@@ -477,7 +518,16 @@ def subscribe_post() -> JSONResponse:
 
 def process_update(payload: dict[str, Any]) -> None:
     update_type = str(payload.get("update_type") or "")
-    if update_type and update_type not in {"message_created", "bot_started"}:
+    member_join_update_types = {
+        "chat_member_added",
+        "chat_members_added",
+        "member_joined",
+        "channel_subscriber_added",
+        "channel_member_added",
+        "user_added_to_chat",
+    }
+
+    if update_type and update_type not in {"message_created", "bot_started", *member_join_update_types}:
         logger.info("Skip unsupported update_type=%s", update_type)
         return
 
@@ -489,8 +539,17 @@ def process_update(payload: dict[str, Any]) -> None:
     user_id = extract_user_id(payload)
     chat_id = extract_chat_id(payload)
     message_text = normalize_incoming_text(extract_message_text(payload) or "")
+    new_member_user_id = extract_new_member_user_id(payload)
 
     try:
+        if update_type in member_join_update_types or (new_member_user_id and update_type != "message_created"):
+            # Событие нового подписчика/участника: отправляем купон в личку новому пользователю.
+            if not new_member_user_id:
+                logger.warning("Событие подписки пришло без user_id нового участника: %s", update_type)
+                return
+            send_coupon(user_id=new_member_user_id, chat_id=None)
+            return
+
         if message_text in {"test", "тест", "/test", "/hello", "/start"}:
             send_max_message(text="ПРИВЕТ", user_id=user_id, chat_id=chat_id)
             return
