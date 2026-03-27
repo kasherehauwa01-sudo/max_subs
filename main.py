@@ -6,6 +6,7 @@ import random
 import threading
 import time
 from calendar import monthrange
+from contextlib import asynccontextmanager
 from datetime import date, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -37,6 +38,23 @@ MAX_WEBHOOK_UPDATE_TYPES = [
 MAX_WEBHOOK_AUTO_REGISTER = os.getenv("MAX_WEBHOOK_AUTO_REGISTER", "true").lower() in {"1", "true", "yes"}
 MAX_STARTUP_SELF_CHECK = os.getenv("MAX_STARTUP_SELF_CHECK", "false").lower() in {"1", "true", "yes"}
 RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+
+def _find_token_recursive(value: Any) -> Optional[str]:
+    if isinstance(value, dict):
+        token_value = value.get("token")
+        if token_value not in (None, ""):
+            return str(token_value)
+        for nested in value.values():
+            found = _find_token_recursive(nested)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for item in value:
+            found = _find_token_recursive(item)
+            if found:
+                return found
+    return None
+
 
 app = FastAPI(title="MAX ID Bot", version="1.2.0")
 
@@ -194,7 +212,9 @@ def _extract_upload_url(payload: dict[str, Any]) -> Optional[str]:
 
 
 def _extract_attachment_token(payload: dict[str, Any]) -> Optional[str]:
-    return _extract_by_paths(payload, ["token", "file.token", "data.token", "attachment.token"])
+    return _extract_by_paths(payload, ["token", "file.token", "data.token", "attachment.token"]) or _find_token_recursive(
+        payload
+    )
 
 
 def upload_image_and_get_token(file_path: Path) -> str:
@@ -215,6 +235,7 @@ def upload_image_and_get_token(file_path: Path) -> str:
     if not upload_url:
         raise HTTPException(status_code=502, detail="MAX /uploads не вернул URL для загрузки")
 
+    token_from_meta = _extract_attachment_token(upload_meta)
     with file_path.open("rb") as fh:
         upload_response = requests.post(
             upload_url,
@@ -223,11 +244,29 @@ def upload_image_and_get_token(file_path: Path) -> str:
             timeout=MAX_TIMEOUT_SECONDS,
         )
     if upload_response.status_code >= 400:
+        # fallback для совместимости с возможной схемой multipart-поля "file"
+        with file_path.open("rb") as fh:
+            upload_response = requests.post(
+                upload_url,
+                headers={"Authorization": MAX_BOT_TOKEN},
+                files={"file": (file_path.name, fh, "image/png")},
+                timeout=MAX_TIMEOUT_SECONDS,
+            )
+    if upload_response.status_code >= 400:
         raise HTTPException(status_code=502, detail=f"Ошибка загрузки файла: {upload_response.status_code}")
 
-    upload_result = upload_response.json() if upload_response.content else {}
-    token = _extract_attachment_token(upload_result)
+    try:
+        upload_result = upload_response.json() if upload_response.content else {}
+    except ValueError:
+        upload_result = {}
+
+    token = _extract_attachment_token(upload_result) or token_from_meta
     if not token:
+        logger.error(
+            "Upload token not found. /uploads response=%s upload response=%s",
+            json.dumps(upload_meta, ensure_ascii=False),
+            upload_response.text[:500],
+        )
         raise HTTPException(status_code=502, detail="Не получен token загруженного изображения")
     return str(token)
 
@@ -365,7 +404,6 @@ def get_effective_webhook_url() -> Optional[str]:
     return None
 
 
-@app.on_event("startup")
 def auto_register_webhook_on_startup() -> None:
     effective_webhook_url = get_effective_webhook_url()
     logger.info(
@@ -399,6 +437,15 @@ def auto_register_webhook_on_startup() -> None:
         logger.info("Webhook registration success on startup: %s", result)
     except Exception as exc:
         logger.exception("Webhook auto-registration failed on startup: %s", exc)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    auto_register_webhook_on_startup()
+    yield
+
+
+app.router.lifespan_context = lifespan
 
 
 @app.post("/setup/subscription")
@@ -558,9 +605,6 @@ def run() -> None:
             "default": {
                 "format": "%(asctime)s %(levelname)s %(name)s %(message)s",
             },
-            "access": {
-                "format": '%(asctime)s %(levelname)s %(name)s %(client_addr)s - "%(request_line)s" %(status_code)s',
-            },
         },
         "handlers": {
             "default": {
@@ -568,16 +612,11 @@ def run() -> None:
                 "formatter": "default",
                 "stream": "ext://sys.stdout",
             },
-            "access": {
-                "class": "logging.StreamHandler",
-                "formatter": "access",
-                "stream": "ext://sys.stdout",
-            },
         },
         "loggers": {
             "uvicorn": {"handlers": ["default"], "level": log_level.upper(), "propagate": False},
             "uvicorn.error": {"handlers": ["default"], "level": log_level.upper(), "propagate": False},
-            "uvicorn.access": {"handlers": ["access"], "level": log_level.upper(), "propagate": False},
+            "uvicorn.access": {"handlers": ["default"], "level": log_level.upper(), "propagate": False},
         },
     }
     uvicorn.run(app, host="0.0.0.0", port=port, log_level=log_level, log_config=log_config)

@@ -47,6 +47,10 @@ class TestMainHelpers(unittest.TestCase):
         text = main.build_coupon_text(date(2026, 3, 20))
         self.assertIn("⏳ Купон действует до 20.03.2026", text)
 
+    def test_extract_attachment_token_recursive(self) -> None:
+        payload = {"result": [{"meta": {"token": "img_token_123"}}]}
+        self.assertEqual(main._extract_attachment_token(payload), "img_token_123")
+
 
 if __name__ == "__main__":
     unittest.main()
