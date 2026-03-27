@@ -47,6 +47,7 @@ MAX_ENABLE_MEMBER_AUTO_COUPON = os.getenv("MAX_ENABLE_MEMBER_AUTO_COUPON", "true
 MAX_WEBHOOK_AUTO_REGISTER = os.getenv("MAX_WEBHOOK_AUTO_REGISTER", "true").lower() in {"1", "true", "yes"}
 MAX_STARTUP_SELF_CHECK = os.getenv("MAX_STARTUP_SELF_CHECK", "false").lower() in {"1", "true", "yes"}
 RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+ACTIVE_WEBHOOK_UPDATE_TYPES: list[str] = []
 
 def _find_token_recursive(value: Any) -> Optional[str]:
     if isinstance(value, dict):
@@ -428,41 +429,59 @@ def register_webhook_subscription() -> dict[str, Any]:
             "Webhook URL не определён. Задайте MAX_WEBHOOK_URL или RAILWAY_PUBLIC_DOMAIN."
         )
 
-    effective_update_types = get_effective_update_types()
-    payload: dict[str, Any] = {"url": webhook_url, "update_types": effective_update_types}
-    if MAX_WEBHOOK_SECRET:
-        payload["secret"] = MAX_WEBHOOK_SECRET
-
-    response = requests.post(
-        f"{MAX_API_BASE_URL}/subscriptions",
-        headers={"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"},
-        json=payload,
-        timeout=MAX_TIMEOUT_SECONDS,
-    )
-
-    if response.status_code >= 400 and MAX_ENABLE_MEMBER_AUTO_COUPON:
-        fallback_payload = dict(payload)
-        fallback_payload["update_types"] = BASE_WEBHOOK_UPDATE_TYPES
-        fallback_response = requests.post(
+    def _register_with_types(update_types: list[str]) -> requests.Response:
+        payload: dict[str, Any] = {"url": webhook_url, "update_types": update_types}
+        if MAX_WEBHOOK_SECRET:
+            payload["secret"] = MAX_WEBHOOK_SECRET
+        return requests.post(
             f"{MAX_API_BASE_URL}/subscriptions",
             headers={"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"},
-            json=fallback_payload,
+            json=payload,
             timeout=MAX_TIMEOUT_SECONDS,
         )
+
+    effective_update_types = get_effective_update_types()
+    response = _register_with_types(effective_update_types)
+    if response.status_code < 400:
+        ACTIVE_WEBHOOK_UPDATE_TYPES.clear()
+        ACTIVE_WEBHOOK_UPDATE_TYPES.extend(effective_update_types)
+        return response.json() if response.content else {"ok": True}
+
+    if MAX_ENABLE_MEMBER_AUTO_COUPON:
+        accepted_member_types: list[str] = []
+        for member_type in MEMBER_JOIN_UPDATE_TYPES:
+            trial_types = [*BASE_WEBHOOK_UPDATE_TYPES, member_type]
+            trial_response = _register_with_types(trial_types)
+            if trial_response.status_code < 400:
+                accepted_member_types.append(member_type)
+
+        if accepted_member_types:
+            final_types = [*BASE_WEBHOOK_UPDATE_TYPES, *accepted_member_types]
+            final_response = _register_with_types(final_types)
+            if final_response.status_code < 400:
+                ACTIVE_WEBHOOK_UPDATE_TYPES.clear()
+                ACTIVE_WEBHOOK_UPDATE_TYPES.extend(final_types)
+                logger.warning(
+                    "Some member update types are unsupported. Registered with partial member types: %s",
+                    ",".join(accepted_member_types),
+                )
+                return final_response.json() if final_response.content else {"ok": True}
+
+        fallback_response = _register_with_types(BASE_WEBHOOK_UPDATE_TYPES)
         if fallback_response.status_code < 400:
+            ACTIVE_WEBHOOK_UPDATE_TYPES.clear()
+            ACTIVE_WEBHOOK_UPDATE_TYPES.extend(BASE_WEBHOOK_UPDATE_TYPES)
             logger.warning(
-                "Subscription with member update types was rejected, fallback to base update types succeeded."
+                "No supported member update types detected. Registered with base update types only: %s",
+                ",".join(BASE_WEBHOOK_UPDATE_TYPES),
             )
             return fallback_response.json() if fallback_response.content else {"ok": True}
 
-    if response.status_code >= 400:
-        logger.error("MAX /subscriptions register failed %s: %s", response.status_code, response.text)
-        raise HTTPException(
-            status_code=502,
-            detail=f"Не удалось зарегистрировать webhook в MAX: status={response.status_code}",
-        )
-
-    return response.json() if response.content else {"ok": True}
+    logger.error("MAX /subscriptions register failed %s: %s", response.status_code, response.text)
+    raise HTTPException(
+        status_code=502,
+        detail=f"Не удалось зарегистрировать webhook в MAX: status={response.status_code}",
+    )
 
 
 def get_effective_webhook_url() -> Optional[str]:
@@ -656,6 +675,7 @@ def health_config() -> JSONResponse:
                 "webhook_secret_set": bool(MAX_WEBHOOK_SECRET),
                 "webhook_auto_register": MAX_WEBHOOK_AUTO_REGISTER,
                 "webhook_update_types": get_effective_update_types(),
+                "active_webhook_update_types": ACTIVE_WEBHOOK_UPDATE_TYPES,
                 "member_auto_coupon_enabled": MAX_ENABLE_MEMBER_AUTO_COUPON,
                 "startup_self_check": MAX_STARTUP_SELF_CHECK,
                 "issues": issues,
