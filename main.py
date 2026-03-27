@@ -329,7 +329,7 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
             image_path = generate_ean13_png_file(barcode_value, Path(tmp_dir))
             token = upload_image_and_get_token(image_path)
             send_max_message(
-                text=coupon_text,
+                text=f"\n{coupon_text}",
                 user_id=user_id,
                 chat_id=chat_id,
                 attachments=[{"type": "image", "payload": {"token": token}}],
