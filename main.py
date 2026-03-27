@@ -5,6 +5,10 @@ import os
 import random
 import threading
 import time
+from calendar import monthrange
+from datetime import date, datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Optional
 
 import requests
@@ -143,7 +147,97 @@ def _is_duplicate_and_mark(key: str) -> bool:
         return False
 
 
-def send_max_message(text: str, user_id: Optional[str] = None, chat_id: Optional[str] = None) -> dict[str, Any]:
+def get_coupon_barcode_and_expiry(target_date: Optional[date] = None) -> tuple[str, date]:
+    current_date = target_date or datetime.utcnow().date()
+    day = current_date.day
+    month_last_day = monthrange(current_date.year, current_date.month)[1]
+
+    if 1 <= day <= 10:
+        barcode_value = "7123100000145"
+        expiry = current_date.replace(day=10)
+    elif 11 <= day <= 20:
+        barcode_value = "7123100000152"
+        expiry = current_date.replace(day=20)
+    else:
+        barcode_value = "7123100000169"
+        expiry = current_date.replace(day=month_last_day)
+
+    return barcode_value, expiry
+
+
+def build_coupon_text(expiry_date: date) -> str:
+    expiry_str = expiry_date.strftime("%d.%m.%Y")
+    return (
+        "Спасибо, что подписались 💛\n"
+        "Дарим вам скидку на первую покупку — просто используйте этот купон при оформлении заказа.\n\n"
+        "🛍 Покажите штрихкод на кассе и покупайте с выгодой\n\n"
+        f"⏳ Купон действует до {expiry_str}"
+    )
+
+
+def generate_ean13_png_file(barcode_value: str, output_dir: Path) -> Path:
+    """
+    Генерирует PNG-файл EAN13.
+    Используется ленивый импорт, чтобы модуль main.py не падал при импорте без этих зависимостей.
+    """
+    from barcode import EAN13  # type: ignore[import-not-found]
+    from barcode.writer import ImageWriter  # type: ignore[import-not-found]
+
+    filename = output_dir / "coupon_ean13"
+    ean = EAN13(barcode_value, writer=ImageWriter())
+    saved_path = Path(ean.save(str(filename)))
+    return saved_path
+
+
+def _extract_upload_url(payload: dict[str, Any]) -> Optional[str]:
+    return _extract_by_paths(payload, ["url", "upload_url", "data.url"])
+
+
+def _extract_attachment_token(payload: dict[str, Any]) -> Optional[str]:
+    return _extract_by_paths(payload, ["token", "file.token", "data.token", "attachment.token"])
+
+
+def upload_image_and_get_token(file_path: Path) -> str:
+    if not MAX_BOT_TOKEN:
+        raise RuntimeError("MAX_BOT_TOKEN не задан в переменных окружения")
+
+    response = requests.post(
+        f"{MAX_API_BASE_URL}/uploads",
+        params={"type": "image"},
+        headers={"Authorization": MAX_BOT_TOKEN},
+        timeout=MAX_TIMEOUT_SECONDS,
+    )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Не удалось получить upload URL: {response.status_code}")
+
+    upload_meta = response.json() if response.content else {}
+    upload_url = _extract_upload_url(upload_meta)
+    if not upload_url:
+        raise HTTPException(status_code=502, detail="MAX /uploads не вернул URL для загрузки")
+
+    with file_path.open("rb") as fh:
+        upload_response = requests.post(
+            upload_url,
+            headers={"Authorization": MAX_BOT_TOKEN},
+            files={"data": (file_path.name, fh, "image/png")},
+            timeout=MAX_TIMEOUT_SECONDS,
+        )
+    if upload_response.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Ошибка загрузки файла: {upload_response.status_code}")
+
+    upload_result = upload_response.json() if upload_response.content else {}
+    token = _extract_attachment_token(upload_result)
+    if not token:
+        raise HTTPException(status_code=502, detail="Не получен token загруженного изображения")
+    return str(token)
+
+
+def send_max_message(
+    text: str,
+    user_id: Optional[str] = None,
+    chat_id: Optional[str] = None,
+    attachments: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
     if not MAX_BOT_TOKEN:
         raise RuntimeError("MAX_BOT_TOKEN не задан в переменных окружения")
     if not user_id and not chat_id:
@@ -159,7 +253,7 @@ def send_max_message(text: str, user_id: Optional[str] = None, chat_id: Optional
                 url,
                 params=params,
                 headers={"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"},
-                json={"text": text},
+                json={"text": text, **({"attachments": attachments} if attachments else {})},
                 timeout=MAX_TIMEOUT_SECONDS,
             )
 
@@ -178,6 +272,29 @@ def send_max_message(text: str, user_id: Optional[str] = None, chat_id: Optional
             _sleep_backoff(attempt)
 
     raise HTTPException(status_code=502, detail=f"MAX API недоступен после ретраев: {last_error}")
+
+
+def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
+    barcode_value, expiry_date = get_coupon_barcode_and_expiry()
+    coupon_text = build_coupon_text(expiry_date)
+
+    try:
+        with TemporaryDirectory(prefix="coupon_ean13_") as tmp_dir:
+            image_path = generate_ean13_png_file(barcode_value, Path(tmp_dir))
+            token = upload_image_and_get_token(image_path)
+            send_max_message(
+                text=f"{coupon_text}\n\nШтрихкод: {barcode_value}",
+                user_id=user_id,
+                chat_id=chat_id,
+                attachments=[{"type": "image", "payload": {"token": token}}],
+            )
+    except Exception as exc:
+        logger.exception("Не удалось отправить изображение купона, отправляем текстовый fallback: %s", exc)
+        send_max_message(
+            text=f"{coupon_text}\n\nШтрихкод: {barcode_value}",
+            user_id=user_id,
+            chat_id=chat_id,
+        )
 
 
 def check_max_auth() -> dict[str, Any]:
@@ -317,6 +434,9 @@ def process_update(payload: dict[str, Any]) -> None:
     try:
         if message_text in {"test", "тест", "/test", "/hello", "/start"}:
             send_max_message(text="ПРИВЕТ", user_id=user_id, chat_id=chat_id)
+            return
+        if message_text in {"купон", "/купон", "coupon", "/coupon"}:
+            send_coupon(user_id=user_id, chat_id=chat_id)
             return
         if message_text in {"id", "айди", "/id"}:
             if user_id:
