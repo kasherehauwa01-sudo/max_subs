@@ -526,7 +526,6 @@ def process_update(payload: dict[str, Any]) -> None:
         "channel_member_added",
         "user_added_to_chat",
     }
-
     if update_type and update_type not in {"message_created", "bot_started", *member_join_update_types}:
         logger.info("Skip unsupported update_type=%s", update_type)
         return

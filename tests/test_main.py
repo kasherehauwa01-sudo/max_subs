@@ -61,6 +61,5 @@ class TestMainHelpers(unittest.TestCase):
         payload = {"members": [{"id": 777002}]}
         self.assertEqual(main.extract_new_member_user_id(payload), "777002")
 
-
 if __name__ == "__main__":
     unittest.main()
