@@ -32,6 +32,7 @@
 
 Если MAX API вернёт нестандартный формат ответа после загрузки файла, бот попробует извлечь `token` из нескольких возможных полей и вложенных структур.
 Для авто-купонов новым подписчикам включите в webhook-подписке типы событий вступления/подписки (например, `chat_member_added` и аналоги, доступные в вашей интеграции MAX).
+По умолчанию бот пытается подписать такие события автоматически, если `MAX_ENABLE_MEMBER_AUTO_COUPON=true`.
 
 Текст купона:
 
@@ -188,6 +189,7 @@ MAX_API_BASE_URL=https://platform-api.max.ru
   - `MAX_WEBHOOK_SECRET` (если указываете `secret` при создании подписки)
   - `MAX_DEDUP_TTL_SECONDS` (например, `3600`, TTL dedup ключей)
   - `MAX_WEBHOOK_UPDATE_TYPES` (например, `message_created,bot_started,message_callback`)
+  - `MAX_ENABLE_MEMBER_AUTO_COUPON` (`true/false`, авто-купон новым подписчикам)
   - `MAX_STARTUP_SELF_CHECK` (`true/false`, проверка `GET /me` при старте)
   - `LOG_LEVEL` (`INFO`)
   - `MAX_WEBHOOK_AUTO_REGISTER` (рекомендуется `true`, по умолчанию в коде теперь `true`)

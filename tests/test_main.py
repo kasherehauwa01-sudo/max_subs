@@ -61,5 +61,10 @@ class TestMainHelpers(unittest.TestCase):
         payload = {"members": [{"id": 777002}]}
         self.assertEqual(main.extract_new_member_user_id(payload), "777002")
 
+    def test_effective_update_types_contains_member_types_by_default(self) -> None:
+        update_types = main.get_effective_update_types()
+        self.assertIn("message_created", update_types)
+        self.assertIn("chat_member_added", update_types)
+
 if __name__ == "__main__":
     unittest.main()

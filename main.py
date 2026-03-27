@@ -7,7 +7,7 @@ import threading
 import time
 from calendar import monthrange
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Optional
@@ -30,11 +30,20 @@ MAX_WEBHOOK_SECRET = os.getenv("MAX_WEBHOOK_SECRET")
 MAX_API_MAX_RETRIES = int(os.getenv("MAX_API_MAX_RETRIES", "5"))
 MAX_DEDUP_TTL_SECONDS = int(os.getenv("MAX_DEDUP_TTL_SECONDS", "3600"))
 MAX_WEBHOOK_URL = os.getenv("MAX_WEBHOOK_URL")
-MAX_WEBHOOK_UPDATE_TYPES = [
+BASE_WEBHOOK_UPDATE_TYPES = [
     item.strip()
     for item in os.getenv("MAX_WEBHOOK_UPDATE_TYPES", "message_created,bot_started,message_callback").split(",")
     if item.strip()
 ]
+MEMBER_JOIN_UPDATE_TYPES = [
+    "chat_member_added",
+    "chat_members_added",
+    "member_joined",
+    "channel_subscriber_added",
+    "channel_member_added",
+    "user_added_to_chat",
+]
+MAX_ENABLE_MEMBER_AUTO_COUPON = os.getenv("MAX_ENABLE_MEMBER_AUTO_COUPON", "true").lower() in {"1", "true", "yes"}
 MAX_WEBHOOK_AUTO_REGISTER = os.getenv("MAX_WEBHOOK_AUTO_REGISTER", "true").lower() in {"1", "true", "yes"}
 MAX_STARTUP_SELF_CHECK = os.getenv("MAX_STARTUP_SELF_CHECK", "false").lower() in {"1", "true", "yes"}
 RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN")
@@ -207,7 +216,7 @@ def _is_duplicate_and_mark(key: str) -> bool:
 
 
 def get_coupon_barcode_and_expiry(target_date: Optional[date] = None) -> tuple[str, date]:
-    current_date = target_date or datetime.utcnow().date()
+    current_date = target_date or datetime.now(timezone.utc).date()
     day = current_date.day
     month_last_day = monthrange(current_date.year, current_date.month)[1]
 
@@ -419,7 +428,8 @@ def register_webhook_subscription() -> dict[str, Any]:
             "Webhook URL не определён. Задайте MAX_WEBHOOK_URL или RAILWAY_PUBLIC_DOMAIN."
         )
 
-    payload: dict[str, Any] = {"url": webhook_url, "update_types": MAX_WEBHOOK_UPDATE_TYPES}
+    effective_update_types = get_effective_update_types()
+    payload: dict[str, Any] = {"url": webhook_url, "update_types": effective_update_types}
     if MAX_WEBHOOK_SECRET:
         payload["secret"] = MAX_WEBHOOK_SECRET
 
@@ -429,6 +439,21 @@ def register_webhook_subscription() -> dict[str, Any]:
         json=payload,
         timeout=MAX_TIMEOUT_SECONDS,
     )
+
+    if response.status_code >= 400 and MAX_ENABLE_MEMBER_AUTO_COUPON:
+        fallback_payload = dict(payload)
+        fallback_payload["update_types"] = BASE_WEBHOOK_UPDATE_TYPES
+        fallback_response = requests.post(
+            f"{MAX_API_BASE_URL}/subscriptions",
+            headers={"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"},
+            json=fallback_payload,
+            timeout=MAX_TIMEOUT_SECONDS,
+        )
+        if fallback_response.status_code < 400:
+            logger.warning(
+                "Subscription with member update types was rejected, fallback to base update types succeeded."
+            )
+            return fallback_response.json() if fallback_response.content else {"ok": True}
 
     if response.status_code >= 400:
         logger.error("MAX /subscriptions register failed %s: %s", response.status_code, response.text)
@@ -453,6 +478,17 @@ def get_effective_webhook_url() -> Optional[str]:
     return None
 
 
+def get_effective_update_types() -> list[str]:
+    if not MAX_ENABLE_MEMBER_AUTO_COUPON:
+        return BASE_WEBHOOK_UPDATE_TYPES
+
+    combined: list[str] = []
+    for update_type in [*BASE_WEBHOOK_UPDATE_TYPES, *MEMBER_JOIN_UPDATE_TYPES]:
+        if update_type not in combined:
+            combined.append(update_type)
+    return combined
+
+
 def auto_register_webhook_on_startup() -> None:
     effective_webhook_url = get_effective_webhook_url()
     logger.info(
@@ -461,7 +497,7 @@ def auto_register_webhook_on_startup() -> None:
         MAX_WEBHOOK_URL or "<empty>",
         effective_webhook_url or "<empty>",
         MAX_WEBHOOK_AUTO_REGISTER,
-        ",".join(MAX_WEBHOOK_UPDATE_TYPES) or "<empty>",
+        ",".join(get_effective_update_types()) or "<empty>",
         bool(MAX_WEBHOOK_SECRET),
         MAX_STARTUP_SELF_CHECK,
     )
@@ -518,14 +554,7 @@ def subscribe_post() -> JSONResponse:
 
 def process_update(payload: dict[str, Any]) -> None:
     update_type = str(payload.get("update_type") or "")
-    member_join_update_types = {
-        "chat_member_added",
-        "chat_members_added",
-        "member_joined",
-        "channel_subscriber_added",
-        "channel_member_added",
-        "user_added_to_chat",
-    }
+    member_join_update_types = set(MEMBER_JOIN_UPDATE_TYPES)
     if update_type and update_type not in {"message_created", "bot_started", *member_join_update_types}:
         logger.info("Skip unsupported update_type=%s", update_type)
         return
@@ -626,7 +655,8 @@ def health_config() -> JSONResponse:
                 "effective_webhook_url": effective_webhook_url,
                 "webhook_secret_set": bool(MAX_WEBHOOK_SECRET),
                 "webhook_auto_register": MAX_WEBHOOK_AUTO_REGISTER,
-                "webhook_update_types": MAX_WEBHOOK_UPDATE_TYPES,
+                "webhook_update_types": get_effective_update_types(),
+                "member_auto_coupon_enabled": MAX_ENABLE_MEMBER_AUTO_COUPON,
                 "startup_self_check": MAX_STARTUP_SELF_CHECK,
                 "issues": issues,
             },
