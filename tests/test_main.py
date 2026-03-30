@@ -58,5 +58,13 @@ class TestMainHelpers(unittest.TestCase):
         self.assertIn("message_created", update_types)
         self.assertIn("bot_started", update_types)
 
+    def test_miniapp_url_from_webhook_url(self) -> None:
+        original = main.MAX_WEBHOOK_URL
+        try:
+            main.MAX_WEBHOOK_URL = "https://example.com/webhook"
+            self.assertEqual(main.get_miniapp_url(), "https://example.com/miniapp")
+        finally:
+            main.MAX_WEBHOOK_URL = original
+
 if __name__ == "__main__":
     unittest.main()

@@ -11,6 +11,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import requests
 import uvicorn
@@ -352,12 +353,25 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
 
 
 def get_miniapp_url() -> Optional[str]:
-    base_url = os.getenv("PUBLIC_BASE_URL")
+    base_url = get_public_base_url()
     if base_url:
-        return f"{base_url.rstrip('/')}/miniapp"
+        return f"{base_url}/miniapp"
     webhook_url = get_effective_webhook_url()
     if webhook_url:
         return webhook_url.removesuffix("/webhook") + "/miniapp"
+    return None
+
+
+def get_public_base_url() -> Optional[str]:
+    base_url = os.getenv("PUBLIC_BASE_URL")
+    if base_url:
+        return base_url.rstrip("/")
+
+    webhook_url = get_effective_webhook_url()
+    if webhook_url:
+        parsed = urlparse(webhook_url)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
     return None
 
 
@@ -372,7 +386,7 @@ def build_miniapp_button_attachments() -> list[dict[str, Any]]:
                 "buttons": [
                     [
                         {
-                            "type": "open_app",
+                            "type": "link",
                             "text": "Получить купон",
                             "url": miniapp_url,
                         }
@@ -619,9 +633,22 @@ def process_update(payload: dict[str, Any]) -> None:
         logger.exception("Ошибка обработки события: %s", exc)
 
 
-@app.get("/")
-def root() -> dict[str, str]:
-    return {"service": "max-id-bot", "status": "ok", "hint": "Use POST /webhook for MAX events"}
+@app.get("/", response_class=HTMLResponse)
+def root() -> str:
+    miniapp_url = get_miniapp_url() or "/miniapp"
+    return f"""
+<html lang="ru">
+  <body style="font-family:sans-serif;max-width:700px;margin:20px auto;">
+    <h3>MAX ID Bot</h3>
+    <p>Сервис работает.</p>
+    <ul>
+      <li>Webhook endpoint: <code>/webhook</code></li>
+      <li>Miniapp: <a href="{miniapp_url}">{miniapp_url}</a></li>
+      <li>Health: <a href="/health">/health</a></li>
+    </ul>
+  </body>
+</html>
+"""
 
 
 @app.get("/webhook")
