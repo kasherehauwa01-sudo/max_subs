@@ -413,25 +413,30 @@ def is_user_subscribed_to_channel(user_id: str) -> bool:
     candidates = [
         f"{MAX_API_BASE_URL}/chats/{MAX_CHANNEL_CHAT_ID}/members/{user_id}",
         f"{MAX_API_BASE_URL}/chats/{MAX_CHANNEL_CHAT_ID}/members",
+        f"{MAX_API_BASE_URL}/chats/{MAX_CHANNEL_CHAT_ID}/subscribers/{user_id}",
+        f"{MAX_API_BASE_URL}/chats/{MAX_CHANNEL_CHAT_ID}/subscribers",
+        f"{MAX_API_BASE_URL}/channels/{MAX_CHANNEL_CHAT_ID}/members/{user_id}",
+        f"{MAX_API_BASE_URL}/channels/{MAX_CHANNEL_CHAT_ID}/subscribers/{user_id}",
+        f"{MAX_API_BASE_URL}/channels/{MAX_CHANNEL_CHAT_ID}/subscribers",
     ]
     headers = {"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"}
 
     for url in candidates:
         try:
-            params = {"user_id": user_id} if url.endswith("/members") else None
+            params = {"user_id": user_id} if url.endswith("/members") or url.endswith("/subscribers") else None
             resp = requests.get(url, params=params, headers=headers, timeout=MAX_TIMEOUT_SECONDS)
             if resp.status_code == 404:
                 continue
             if resp.status_code >= 400:
                 continue
 
-            # Для endpoint вида /members/{user_id} успешный 200 обычно уже означает,
+            # Для endpoint вида /members/{user_id} или /subscribers/{user_id} успешный 200 обычно уже означает,
             # что пользователь найден среди участников.
-            if not url.endswith("/members"):
+            if not (url.endswith("/members") or url.endswith("/subscribers")):
                 return True
 
             payload = resp.json() if resp.content else {}
-            if payload and contains_user_id(payload, user_id):
+            if payload and is_subscription_confirmed(payload, user_id):
                 return True
         except Exception:
             continue
@@ -464,6 +469,20 @@ def contains_user_id(value: Any, user_id: str) -> bool:
                 return True
         return False
 
+    return False
+
+
+def is_subscription_confirmed(payload: Any, user_id: str) -> bool:
+    if contains_user_id(payload, user_id):
+        return True
+
+    if isinstance(payload, dict):
+        for flag_key in ("subscribed", "is_subscribed", "is_member", "member", "joined", "in_chat"):
+            flag = payload.get(flag_key)
+            if isinstance(flag, bool) and flag:
+                return True
+            if isinstance(flag, str) and flag.lower() in {"true", "yes", "member", "joined", "subscribed"}:
+                return True
     return False
 
 
@@ -921,6 +940,8 @@ def miniapp_page() -> str:
 @app.get("/miniapp/status")
 def miniapp_status(user_id: str) -> JSONResponse:
     subscribed = is_user_subscribed_to_channel(user_id=user_id)
+    if not subscribed:
+        logger.info("Subscription check is false for user_id=%s channel_chat_id=%s", user_id, MAX_CHANNEL_CHAT_ID)
     return JSONResponse({"ok": True, "user_id": user_id, "subscribed": subscribed, "channel_chat_id": MAX_CHANNEL_CHAT_ID})
 
 
