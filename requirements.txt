@@ -1,0 +1,5 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+requests==2.32.5
+python-barcode==0.15.1
+Pillow==11.3.0
