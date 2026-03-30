@@ -712,14 +712,19 @@ def render_miniapp_html() -> str:
         background: #f9fafb;
         font-size: 14px;
       }}
+      .uid {{
+        font-size: 14px;
+        color: #475569;
+        margin-bottom: 8px;
+      }}
     </style>
   </head>
   <body>
     <div class="wrap">
       <div class="card">
         <h2>🎁 Купон на скидку</h2>
-        <p>Введите ваш <b>user_id</b> из MAX, проверьте подписку и получите купон.</p>
-        <input id="userId" placeholder="Введите user_id" />
+        <p>Проверьте подписку и получите купон.</p>
+        <div id="uidLabel" class="uid">user_id: определяем...</div>
         <div class="row">
           <button id="checkBtn" class="btn-secondary">Проверить подписку</button>
           <button id="showCouponBtn" class="btn-disabled" disabled>Показать купон</button>
@@ -734,6 +739,16 @@ def render_miniapp_html() -> str:
       const showCouponBtn = document.getElementById('showCouponBtn');
       const subscribeBtn = document.getElementById('subscribeBtn');
       const statusEl = document.getElementById('status');
+      const uidLabel = document.getElementById('uidLabel');
+
+      const detectedUserId = (
+        window.WebApp?.initDataUnsafe?.user?.id ||
+        new URLSearchParams(window.location.search).get('user_id') ||
+        ''
+      ).toString();
+      uidLabel.textContent = detectedUserId
+        ? `user_id: ${{detectedUserId}}`
+        : 'user_id: не определён (откройте миниприложение из чата с ботом)';
 
       const setCouponEnabled = (enabled) => {{
         showCouponBtn.disabled = !enabled;
@@ -741,13 +756,12 @@ def render_miniapp_html() -> str:
       }};
 
       checkBtn.onclick = async () => {{
-        const userId = document.getElementById('userId').value.trim();
-        if (!userId) {{
-          statusEl.textContent = 'Укажите user_id.';
+        if (!detectedUserId) {{
+          statusEl.textContent = 'Не удалось определить user_id. Откройте миниприложение из чата MAX.';
           return;
         }}
         statusEl.textContent = 'Проверяем подписку...';
-        const res = await fetch(`/miniapp/status?user_id=${{encodeURIComponent(userId)}}`);
+        const res = await fetch(`/miniapp/status?user_id=${{encodeURIComponent(detectedUserId)}}`);
         const data = await res.json();
         if (data.subscribed) {{
           setCouponEnabled(true);
@@ -761,16 +775,15 @@ def render_miniapp_html() -> str:
       }};
 
       showCouponBtn.onclick = async () => {{
-        const userId = document.getElementById('userId').value.trim();
-        if (!userId) {{
-          statusEl.textContent = 'Укажите user_id.';
+        if (!detectedUserId) {{
+          statusEl.textContent = 'Не удалось определить user_id. Откройте миниприложение из чата MAX.';
           return;
         }}
         statusEl.textContent = 'Отправляем купон...';
         const res = await fetch('/miniapp/get-coupon', {{
           method: 'POST',
           headers: {{ 'Content-Type': 'application/json' }},
-          body: JSON.stringify({{ user_id: userId }})
+          body: JSON.stringify({{ user_id: detectedUserId }})
         }});
         const data = await res.json();
         if (res.ok && data.ok) {{

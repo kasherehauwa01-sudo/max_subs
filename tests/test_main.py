@@ -69,6 +69,8 @@ class TestMainHelpers(unittest.TestCase):
     def test_render_miniapp_contains_show_coupon_button(self) -> None:
         html = main.render_miniapp_html()
         self.assertIn("Показать купон", html)
+        self.assertNotIn('placeholder="Введите user_id"', html)
+        self.assertIn("initDataUnsafe", html)
 
 if __name__ == "__main__":
     unittest.main()
