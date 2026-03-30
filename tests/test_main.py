@@ -71,6 +71,7 @@ class TestMainHelpers(unittest.TestCase):
         self.assertIn("Показать купон", html)
         self.assertNotIn('placeholder="Введите user_id"', html)
         self.assertIn("initDataUnsafe", html)
+        self.assertIn("max-web-app.js", html)
 
 if __name__ == "__main__":
     unittest.main()

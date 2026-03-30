@@ -641,6 +641,7 @@ def render_miniapp_html() -> str:
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Купон MAX ID Bot</title>
+    <script src="https://st.max.ru/js/max-web-app.js"></script>
     <style>
       body {{
         margin: 0;
@@ -740,15 +741,35 @@ def render_miniapp_html() -> str:
       const subscribeBtn = document.getElementById('subscribeBtn');
       const statusEl = document.getElementById('status');
       const uidLabel = document.getElementById('uidLabel');
-
-      const detectedUserId = (
-        window.WebApp?.initDataUnsafe?.user?.id ||
-        new URLSearchParams(window.location.search).get('user_id') ||
-        ''
-      ).toString();
+      if (window.WebApp?.ready) {{
+        window.WebApp.ready();
+      }}
+      const getFromInitData = () => {{
+        try {{
+          const initData = new URLSearchParams(window.location.search).get('initData');
+          if (!initData) return '';
+          const params = new URLSearchParams(initData);
+          const userRaw = params.get('user');
+          if (!userRaw) return '';
+          const userObj = JSON.parse(userRaw);
+          return (userObj.user_id || userObj.id || '').toString();
+        }} catch (_e) {{
+          return '';
+        }}
+      }};
+      const getDetectedUserId = () => {{
+        return (
+          window.WebApp?.initDataUnsafe?.user?.user_id ||
+          window.WebApp?.initDataUnsafe?.user?.id ||
+          new URLSearchParams(window.location.search).get('user_id') ||
+          getFromInitData() ||
+          ''
+        ).toString();
+      }};
+      const detectedUserId = getDetectedUserId();
       uidLabel.textContent = detectedUserId
         ? `user_id: ${{detectedUserId}}`
-        : 'user_id: не определён (откройте миниприложение из чата с ботом)';
+        : 'user_id: не определён (откройте miniapp кнопкой из чата с ботом)';
 
       const setCouponEnabled = (enabled) => {{
         showCouponBtn.disabled = !enabled;
