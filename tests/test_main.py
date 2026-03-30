@@ -66,5 +66,9 @@ class TestMainHelpers(unittest.TestCase):
         finally:
             main.MAX_WEBHOOK_URL = original
 
+    def test_render_miniapp_contains_show_coupon_button(self) -> None:
+        html = main.render_miniapp_html()
+        self.assertIn("Показать купон", html)
+
 if __name__ == "__main__":
     unittest.main()

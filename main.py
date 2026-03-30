@@ -633,22 +633,161 @@ def process_update(payload: dict[str, Any]) -> None:
         logger.exception("Ошибка обработки события: %s", exc)
 
 
-@app.get("/", response_class=HTMLResponse)
-def root() -> str:
-    miniapp_url = get_miniapp_url() or "/miniapp"
+def render_miniapp_html() -> str:
     return f"""
+<!doctype html>
 <html lang="ru">
-  <body style="font-family:sans-serif;max-width:700px;margin:20px auto;">
-    <h3>MAX ID Bot</h3>
-    <p>Сервис работает.</p>
-    <ul>
-      <li>Webhook endpoint: <code>/webhook</code></li>
-      <li>Miniapp: <a href="{miniapp_url}">{miniapp_url}</a></li>
-      <li>Health: <a href="/health">/health</a></li>
-    </ul>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Купон MAX ID Bot</title>
+    <style>
+      body {{
+        margin: 0;
+        font-family: Inter, system-ui, sans-serif;
+        background: linear-gradient(180deg, #f4f8ff 0%, #eef7ff 100%);
+        color: #1f2937;
+      }}
+      .wrap {{
+        max-width: 520px;
+        margin: 0 auto;
+        padding: 20px 14px 28px;
+      }}
+      .card {{
+        background: #fff;
+        border-radius: 18px;
+        box-shadow: 0 8px 24px rgba(29, 78, 216, 0.1);
+        padding: 18px;
+      }}
+      h2 {{
+        margin: 0 0 10px;
+        font-size: 22px;
+      }}
+      p {{
+        margin: 0 0 12px;
+        line-height: 1.45;
+      }}
+      input {{
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #dbe4ff;
+        border-radius: 12px;
+        padding: 12px;
+        font-size: 16px;
+      }}
+      .row {{
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+      }}
+      button, .btn-link {{
+        border: 0;
+        border-radius: 12px;
+        padding: 11px 14px;
+        font-size: 15px;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }}
+      .btn-primary {{
+        background: #2563eb;
+        color: #fff;
+      }}
+      .btn-secondary {{
+        background: #eef2ff;
+        color: #1e40af;
+      }}
+      .btn-disabled {{
+        background: #e5e7eb;
+        color: #9ca3af;
+        cursor: not-allowed;
+      }}
+      .status {{
+        margin-top: 12px;
+        padding: 10px;
+        border-radius: 10px;
+        background: #f9fafb;
+        font-size: 14px;
+      }}
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h2>🎁 Купон на скидку</h2>
+        <p>Введите ваш <b>user_id</b> из MAX, проверьте подписку и получите купон.</p>
+        <input id="userId" placeholder="Введите user_id" />
+        <div class="row">
+          <button id="checkBtn" class="btn-secondary">Проверить подписку</button>
+          <button id="showCouponBtn" class="btn-disabled" disabled>Показать купон</button>
+          <a id="subscribeBtn" href="{MAX_CHANNEL_URL}" target="_blank" class="btn-link btn-primary" style="display:none;">Подписаться на канал</a>
+        </div>
+        <div id="status" class="status">Статус: ожидаем проверку подписки.</div>
+      </div>
+    </div>
+
+    <script>
+      const checkBtn = document.getElementById('checkBtn');
+      const showCouponBtn = document.getElementById('showCouponBtn');
+      const subscribeBtn = document.getElementById('subscribeBtn');
+      const statusEl = document.getElementById('status');
+
+      const setCouponEnabled = (enabled) => {{
+        showCouponBtn.disabled = !enabled;
+        showCouponBtn.className = enabled ? 'btn-primary' : 'btn-disabled';
+      }};
+
+      checkBtn.onclick = async () => {{
+        const userId = document.getElementById('userId').value.trim();
+        if (!userId) {{
+          statusEl.textContent = 'Укажите user_id.';
+          return;
+        }}
+        statusEl.textContent = 'Проверяем подписку...';
+        const res = await fetch(`/miniapp/status?user_id=${{encodeURIComponent(userId)}}`);
+        const data = await res.json();
+        if (data.subscribed) {{
+          setCouponEnabled(true);
+          subscribeBtn.style.display = 'none';
+          statusEl.textContent = 'Вы подписаны ✅ Нажмите «Показать купон».';
+        }} else {{
+          setCouponEnabled(false);
+          subscribeBtn.style.display = 'inline-flex';
+          statusEl.textContent = 'Вы не подписаны. Сначала подпишитесь на канал.';
+        }}
+      }};
+
+      showCouponBtn.onclick = async () => {{
+        const userId = document.getElementById('userId').value.trim();
+        if (!userId) {{
+          statusEl.textContent = 'Укажите user_id.';
+          return;
+        }}
+        statusEl.textContent = 'Отправляем купон...';
+        const res = await fetch('/miniapp/get-coupon', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ user_id: userId }})
+        }});
+        const data = await res.json();
+        if (res.ok && data.ok) {{
+          statusEl.textContent = 'Купон отправлен в чат с ботом ✅';
+        }} else {{
+          statusEl.textContent = 'Не удалось отправить купон. Проверьте подписку и попробуйте снова.';
+        }}
+      }};
+    </script>
   </body>
 </html>
 """
+
+
+@app.get("/", response_class=HTMLResponse)
+def root() -> str:
+    return render_miniapp_html()
 
 
 @app.get("/webhook")
@@ -724,47 +863,7 @@ async def webhook(
 
 @app.get("/miniapp", response_class=HTMLResponse)
 def miniapp_page() -> str:
-    return f"""
-<!doctype html>
-<html lang="ru">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Купон</title>
-  </head>
-  <body style="font-family: sans-serif; max-width: 480px; margin: 24px auto; padding: 0 12px;">
-    <h3>Купон на скидку</h3>
-    <p>Введите ваш user_id из MAX, чтобы проверить подписку.</p>
-    <input id="userId" placeholder="user_id" style="width:100%;padding:10px;" />
-    <div style="margin-top: 12px;">
-      <button id="checkBtn" style="padding:10px 14px;">Проверить подписку</button>
-    </div>
-    <div style="margin-top: 16px;" id="actions"></div>
-    <script>
-      const actions = document.getElementById('actions');
-      document.getElementById('checkBtn').onclick = async () => {{
-        const userId = document.getElementById('userId').value.trim();
-        if (!userId) return;
-        const res = await fetch(`/miniapp/status?user_id=${{encodeURIComponent(userId)}}`);
-        const data = await res.json();
-        if (data.subscribed) {{
-          actions.innerHTML = `<button id="couponBtn" style="padding:10px 14px;">Получить купон</button>`;
-          document.getElementById('couponBtn').onclick = async () => {{
-            await fetch('/miniapp/get-coupon', {{
-              method: 'POST',
-              headers: {{ 'Content-Type': 'application/json' }},
-              body: JSON.stringify({{ user_id: userId }})
-            }});
-            actions.innerHTML += `<p>Купон отправлен в чат с ботом ✅</p>`;
-          }};
-        }} else {{
-          actions.innerHTML = `<a href="{MAX_CHANNEL_URL}" target="_blank"><button style="padding:10px 14px;">Подписаться на канал</button></a>`;
-        }}
-      }};
-    </script>
-  </body>
-</html>
-"""
+    return render_miniapp_html()
 
 
 @app.get("/miniapp/status")
