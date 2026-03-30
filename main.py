@@ -600,7 +600,7 @@ def process_update(payload: dict[str, Any]) -> None:
     message_text = normalize_incoming_text(extract_message_text(payload) or "")
 
     try:
-        if message_text in {"test", "тест", "/test", "/hello", "/start"}:
+        if message_text in {"test", "тест", "/test", "/hello", "/start", "+"}:
             send_miniapp_entry(user_id=user_id, chat_id=chat_id)
             return
         if message_text in {"купон", "/купон", "coupon", "/coupon"}:
