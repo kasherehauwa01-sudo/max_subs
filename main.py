@@ -424,28 +424,46 @@ def is_user_subscribed_to_channel(user_id: str) -> bool:
                 continue
             if resp.status_code >= 400:
                 continue
+
+            # Для endpoint вида /members/{user_id} успешный 200 обычно уже означает,
+            # что пользователь найден среди участников.
+            if not url.endswith("/members"):
+                return True
+
             payload = resp.json() if resp.content else {}
-            # Пробуем определить membership из распространённых структур.
-            if isinstance(payload, dict):
-                if payload.get("user_id") == int(user_id) or payload.get("user_id") == user_id:
-                    return True
-                if payload.get("id") == int(user_id) or payload.get("id") == user_id:
-                    return True
-                members = payload.get("members") or payload.get("items") or payload.get("data")
-                if isinstance(members, list):
-                    for member in members:
-                        if isinstance(member, dict):
-                            member_id = member.get("user_id") or member.get("id")
-                            if str(member_id) == str(user_id):
-                                return True
-            if isinstance(payload, list):
-                for member in payload:
-                    if isinstance(member, dict):
-                        member_id = member.get("user_id") or member.get("id")
-                        if str(member_id) == str(user_id):
-                            return True
+            if payload and contains_user_id(payload, user_id):
+                return True
         except Exception:
             continue
+    return False
+
+
+def contains_user_id(value: Any, user_id: str) -> bool:
+    target = str(user_id)
+
+    if isinstance(value, dict):
+        direct_candidate = value.get("user_id")
+        if direct_candidate is not None and str(direct_candidate) == target:
+            return True
+        direct_id = value.get("id")
+        if direct_id is not None and str(direct_id) == target:
+            return True
+
+        user_obj = value.get("user")
+        if user_obj is not None and contains_user_id(user_obj, user_id):
+            return True
+
+        for nested in value.values():
+            if contains_user_id(nested, user_id):
+                return True
+        return False
+
+    if isinstance(value, list):
+        for item in value:
+            if contains_user_id(item, user_id):
+                return True
+        return False
+
     return False
 
 

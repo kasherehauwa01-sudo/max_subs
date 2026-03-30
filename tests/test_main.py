@@ -73,5 +73,10 @@ class TestMainHelpers(unittest.TestCase):
         self.assertIn("initDataUnsafe", html)
         self.assertIn("max-web-app.js", html)
 
+    def test_contains_user_id_recursive(self) -> None:
+        payload = {"items": [{"user": {"id": 123}}, {"meta": "x"}]}
+        self.assertTrue(main.contains_user_id(payload, "123"))
+        self.assertFalse(main.contains_user_id(payload, "999"))
+
 if __name__ == "__main__":
     unittest.main()
