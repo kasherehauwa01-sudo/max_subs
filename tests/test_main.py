@@ -81,6 +81,7 @@ class TestMainHelpers(unittest.TestCase):
     def test_is_subscription_confirmed_by_flag(self) -> None:
         self.assertTrue(main.is_subscription_confirmed({"is_subscribed": True}, "1"))
         self.assertTrue(main.is_subscription_confirmed({"member": "joined"}, "1"))
+        self.assertTrue(main.is_subscription_confirmed({"status": "subscriber"}, "1"))
 
 if __name__ == "__main__":
     unittest.main()

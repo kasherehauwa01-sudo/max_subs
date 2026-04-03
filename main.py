@@ -428,6 +428,7 @@ def is_user_subscribed_to_channel(user_id: str) -> bool:
             if resp.status_code == 404:
                 continue
             if resp.status_code >= 400:
+                logger.info("Subscription check endpoint %s returned status=%s", url, resp.status_code)
                 continue
 
             # Для endpoint вида /members/{user_id} или /subscribers/{user_id} успешный 200 обычно уже означает,
@@ -483,7 +484,35 @@ def is_subscription_confirmed(payload: Any, user_id: str) -> bool:
                 return True
             if isinstance(flag, str) and flag.lower() in {"true", "yes", "member", "joined", "subscribed"}:
                 return True
+        for status_key in ("status", "membership", "role"):
+            status_val = payload.get(status_key)
+            if isinstance(status_val, str) and status_val.lower() in {"member", "subscriber", "joined", "admin", "owner"}:
+                return True
     return False
+
+
+def get_channel_title() -> str:
+    if not MAX_BOT_TOKEN:
+        return f"chat_id {MAX_CHANNEL_CHAT_ID}"
+
+    headers = {"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"}
+    candidates = [
+        f"{MAX_API_BASE_URL}/chats/{MAX_CHANNEL_CHAT_ID}",
+        f"{MAX_API_BASE_URL}/channels/{MAX_CHANNEL_CHAT_ID}",
+    ]
+    for url in candidates:
+        try:
+            resp = requests.get(url, headers=headers, timeout=MAX_TIMEOUT_SECONDS)
+            if resp.status_code >= 400:
+                continue
+            payload = resp.json() if resp.content else {}
+            if isinstance(payload, dict):
+                title = payload.get("title") or payload.get("name") or payload.get("chat_title")
+                if isinstance(title, str) and title.strip():
+                    return title.strip()
+        except Exception:
+            continue
+    return f"chat_id {MAX_CHANNEL_CHAT_ID}"
 
 
 def check_max_auth() -> dict[str, Any]:
@@ -824,11 +853,11 @@ def render_miniapp_html() -> str:
         if (data.subscribed) {{
           setCouponEnabled(true);
           subscribeBtn.style.display = 'none';
-          statusEl.textContent = 'Вы подписаны ✅ Нажмите «Показать купон».';
+          statusEl.textContent = `${{data.message}} ✅ Нажмите «Показать купон».`;
         }} else {{
           setCouponEnabled(false);
           subscribeBtn.style.display = 'inline-flex';
-          statusEl.textContent = 'Вы не подписаны. Сначала подпишитесь на канал.';
+          statusEl.textContent = `${{data.message}}`;
         }}
       }};
 
@@ -940,9 +969,24 @@ def miniapp_page() -> str:
 @app.get("/miniapp/status")
 def miniapp_status(user_id: str) -> JSONResponse:
     subscribed = is_user_subscribed_to_channel(user_id=user_id)
+    channel_title = get_channel_title()
+    message = (
+        f'Вы подписаны на канал "{channel_title}"'
+        if subscribed
+        else f'Подписка на канал "{channel_title}" не найдена'
+    )
     if not subscribed:
         logger.info("Subscription check is false for user_id=%s channel_chat_id=%s", user_id, MAX_CHANNEL_CHAT_ID)
-    return JSONResponse({"ok": True, "user_id": user_id, "subscribed": subscribed, "channel_chat_id": MAX_CHANNEL_CHAT_ID})
+    return JSONResponse(
+        {
+            "ok": True,
+            "user_id": user_id,
+            "subscribed": subscribed,
+            "channel_chat_id": MAX_CHANNEL_CHAT_ID,
+            "channel_title": channel_title,
+            "message": message,
+        }
+    )
 
 
 @app.post("/miniapp/get-coupon")
