@@ -74,11 +74,21 @@ class TestMainHelpers(unittest.TestCase):
         self.assertIn("max-web-app.js", html)
 
     def test_build_miniapp_button_attachments_uses_open_app(self) -> None:
-        attachments = main.build_miniapp_button_attachments()
+        original_web_app = main.MAX_WEB_APP
+        original_webhook_url = main.MAX_WEBHOOK_URL
+        try:
+            main.MAX_WEB_APP = "https://example.com/miniapp"
+            main.MAX_WEBHOOK_URL = "https://example.com/webhook"
+            attachments = main.build_miniapp_button_attachments()
+        finally:
+            main.MAX_WEB_APP = original_web_app
+            main.MAX_WEBHOOK_URL = original_webhook_url
+
         self.assertEqual(attachments[0]["type"], "inline_keyboard")
         button = attachments[0]["payload"]["buttons"][0][0]
         self.assertEqual(button["type"], "open_app")
         self.assertEqual(button["text"], "Получить купон")
+        self.assertEqual(button["webApp"], "https://example.com/miniapp")
 
     def test_contains_user_id_recursive(self) -> None:
         payload = {"items": [{"user": {"id": 123}}, {"meta": "x"}]}
