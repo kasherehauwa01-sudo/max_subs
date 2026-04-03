@@ -73,6 +73,13 @@ class TestMainHelpers(unittest.TestCase):
         self.assertIn("initDataUnsafe", html)
         self.assertIn("max-web-app.js", html)
 
+    def test_build_miniapp_button_attachments_uses_open_app(self) -> None:
+        attachments = main.build_miniapp_button_attachments()
+        self.assertEqual(attachments[0]["type"], "inline_keyboard")
+        button = attachments[0]["payload"]["buttons"][0][0]
+        self.assertEqual(button["type"], "open_app")
+        self.assertEqual(button["text"], "Получить купон")
+
     def test_contains_user_id_recursive(self) -> None:
         payload = {"items": [{"user": {"id": 123}}, {"meta": "x"}]}
         self.assertTrue(main.contains_user_id(payload, "123"))

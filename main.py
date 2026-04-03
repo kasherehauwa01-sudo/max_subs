@@ -41,6 +41,7 @@ MAX_STARTUP_SELF_CHECK = os.getenv("MAX_STARTUP_SELF_CHECK", "false").lower() in
 RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN")
 MAX_CHANNEL_CHAT_ID = os.getenv("MAX_CHANNEL_CHAT_ID", "72527365111160")
 MAX_CHANNEL_URL = os.getenv("MAX_CHANNEL_URL", f"max://chat/{MAX_CHANNEL_CHAT_ID}")
+MAX_WEB_APP = os.getenv("MAX_WEB_APP")
 ACTIVE_WEBHOOK_UPDATE_TYPES: list[str] = []
 
 def _find_token_recursive(value: Any) -> Optional[str]:
@@ -376,20 +377,22 @@ def get_public_base_url() -> Optional[str]:
 
 
 def build_miniapp_button_attachments() -> list[dict[str, Any]]:
-    miniapp_url = get_miniapp_url()
-    if not miniapp_url:
-        return []
+    # Важно: тип open_app открывает миниприложение внутри MAX-клиента
+    # (как «синяя кнопка»), благодаря чему WebApp-контекст передаёт user_id.
+    button: dict[str, Any] = {
+        "type": "open_app",
+        "text": "Получить купон",
+    }
+    if MAX_WEB_APP:
+        button["web_app"] = MAX_WEB_APP
+
     return [
         {
             "type": "inline_keyboard",
             "payload": {
                 "buttons": [
                     [
-                        {
-                            "type": "link",
-                            "text": "Получить купон",
-                            "url": miniapp_url,
-                        }
+                        button
                     ]
                 ]
             },
@@ -398,12 +401,41 @@ def build_miniapp_button_attachments() -> list[dict[str, Any]]:
 
 
 def send_miniapp_entry(user_id: Optional[str], chat_id: Optional[str]) -> None:
-    send_max_message(
-        text="Откройте миниприложение и нажмите «Получить купон».",
-        user_id=user_id,
-        chat_id=chat_id,
-        attachments=build_miniapp_button_attachments(),
-    )
+    try:
+        send_max_message(
+            text="Откройте миниприложение и нажмите «Получить купон».",
+            user_id=user_id,
+            chat_id=chat_id,
+            attachments=build_miniapp_button_attachments(),
+        )
+    except HTTPException:
+        # Фолбэк для нестандартных клиентов/конфигов:
+        # если open_app не принялся, отправляем link-кнопку на URL miniapp.
+        miniapp_url = get_miniapp_url()
+        fallback_attachments: list[dict[str, Any]] = []
+        if miniapp_url:
+            fallback_attachments = [
+                {
+                    "type": "inline_keyboard",
+                    "payload": {
+                        "buttons": [
+                            [
+                                {
+                                    "type": "link",
+                                    "text": "Получить купон",
+                                    "url": miniapp_url,
+                                }
+                            ]
+                        ]
+                    },
+                }
+            ]
+        send_max_message(
+            text="Откройте миниприложение и нажмите «Получить купон».",
+            user_id=user_id,
+            chat_id=chat_id,
+            attachments=fallback_attachments,
+        )
 
 
 def is_user_subscribed_to_channel(user_id: str) -> bool:
