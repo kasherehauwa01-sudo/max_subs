@@ -378,19 +378,22 @@ def get_public_base_url() -> Optional[str]:
 
 def build_miniapp_button_attachments() -> list[dict[str, Any]]:
     miniapp_url = get_miniapp_url()
-    web_app_value = MAX_WEB_APP or miniapp_url
+    web_app_value = (MAX_WEB_APP or "").strip()
 
-    # Важно: для open_app поле webApp обязательно, иначе MAX API вернёт 400
-    # (proto.payload: "Field 'webApp' cannot be null").
+    # Для open_app MAX API ожидает поле web_app (snake_case) и значение
+    # с username миниприложения (бота), например: "my_bot".
+    # Если web_app не задан, отправляем link-кнопку как безопасный фолбэк.
     if web_app_value:
         button: dict[str, Any] = {
             "type": "open_app",
             "text": "Получить купон",
-            "webApp": web_app_value,
+            "web_app": web_app_value,
         }
     elif miniapp_url:
-        # На случай, если не удалось определить webApp/open_app-параметры,
-        # оставляем рабочий фолбэк с обычной ссылкой.
+        logger.warning(
+            "MAX_WEB_APP не задан: отправляем link-кнопку вместо open_app. "
+            "Чтобы miniapp открывался внутри MAX с контекстом пользователя, укажите MAX_WEB_APP=<bot_username>."
+        )
         button = {
             "type": "link",
             "text": "Получить купон",

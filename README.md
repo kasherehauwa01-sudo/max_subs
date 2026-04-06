@@ -29,7 +29,7 @@
 Проверка подписки учитывает разные форматы ответа MAX API (вложенные `user_id/id`, списки `items/members/data`, флаги `is_subscribed/is_member` и endpoint-ы `members/subscribers`).
 
 > Важно: miniapp нужно открывать кнопкой из чата с ботом. При прямом открытии URL браузером `user_id` может не определиться.
-> Кнопка «Получить купон» от бота отправляется как `open_app` (а не `link`) c обязательным полем `webApp`, чтобы miniapp открывался внутри MAX с корректным WebApp-контекстом.
+> Кнопка «Получить купон» от бота отправляется как `open_app` (а не `link`) c обязательным полем `web_app`, чтобы miniapp открывался внутри MAX с корректным WebApp-контекстом.
 
 Если отправка изображения не удалась, бот отправляет текст купона и предупреждение (без цифрового кода).
 
@@ -199,7 +199,7 @@ MAX_API_BASE_URL=https://platform-api.max.ru
   - `MAX_WEBHOOK_UPDATE_TYPES` (например, `message_created,bot_started,message_callback`)
   - `MAX_CHANNEL_CHAT_ID` (по умолчанию `72527365111160`, канал для проверки подписки)
   - `MAX_CHANNEL_URL` (ссылка для кнопки «Подписаться на канал»)
-  - `MAX_WEB_APP` (опционально, значение для поля `webApp` в кнопке `open_app`; если пусто — используется URL `/miniapp`)
+  - `MAX_WEB_APP` (опционально, username бота для поля `web_app` в кнопке `open_app`; если пусто — отправляется fallback `link` на `/miniapp`)
   - `PUBLIC_BASE_URL` (публичный URL сервиса для миниприложения)
   - `MAX_STARTUP_SELF_CHECK` (`true/false`, проверка `GET /me` при старте)
   - `LOG_LEVEL` (`INFO`)

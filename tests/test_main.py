@@ -77,7 +77,7 @@ class TestMainHelpers(unittest.TestCase):
         original_web_app = main.MAX_WEB_APP
         original_webhook_url = main.MAX_WEBHOOK_URL
         try:
-            main.MAX_WEB_APP = "https://example.com/miniapp"
+            main.MAX_WEB_APP = "my_test_bot"
             main.MAX_WEBHOOK_URL = "https://example.com/webhook"
             attachments = main.build_miniapp_button_attachments()
         finally:
@@ -88,7 +88,7 @@ class TestMainHelpers(unittest.TestCase):
         button = attachments[0]["payload"]["buttons"][0][0]
         self.assertEqual(button["type"], "open_app")
         self.assertEqual(button["text"], "Получить купон")
-        self.assertEqual(button["webApp"], "https://example.com/miniapp")
+        self.assertEqual(button["web_app"], "my_test_bot")
 
     def test_contains_user_id_recursive(self) -> None:
         payload = {"items": [{"user": {"id": 123}}, {"meta": "x"}]}
