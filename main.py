@@ -41,6 +41,7 @@ MAX_STARTUP_SELF_CHECK = os.getenv("MAX_STARTUP_SELF_CHECK", "false").lower() in
 RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN")
 MAX_CHANNEL_CHAT_ID = os.getenv("MAX_CHANNEL_CHAT_ID", "-72559954357735")
 MAX_CHANNEL_URL = os.getenv("MAX_CHANNEL_URL", f"https://web.max.ru/{MAX_CHANNEL_CHAT_ID}")
+MAX_CHANNEL_DEEPLINK = os.getenv("MAX_CHANNEL_DEEPLINK", f"max://chat/{MAX_CHANNEL_CHAT_ID}")
 MAX_WEB_APP = os.getenv("MAX_WEB_APP")
 ACTIVE_WEBHOOK_UPDATE_TYPES: list[str] = []
 
@@ -867,7 +868,7 @@ def render_miniapp_html() -> str:
         <div class="row">
           <button id="checkBtn" class="btn-secondary">Проверить подписку</button>
           <button id="showCouponBtn" class="btn-disabled" disabled>Показать купон</button>
-          <a id="subscribeBtn" href="{MAX_CHANNEL_URL}" class="btn-link btn-primary" style="display:none;">Подписаться на канал</a>
+          <a id="subscribeBtn" href="{MAX_CHANNEL_DEEPLINK}" data-web-url="{MAX_CHANNEL_URL}" class="btn-link btn-primary" style="display:none;">Подписаться на канал</a>
         </div>
         <div id="status" class="status">Статус: ожидаем проверку подписки.</div>
       </div>
@@ -916,16 +917,16 @@ def render_miniapp_html() -> str:
 
       subscribeBtn.onclick = (e) => {{
         e.preventDefault();
-        const url = subscribeBtn.getAttribute('href') || '{MAX_CHANNEL_URL}';
+        const deepLink = subscribeBtn.getAttribute('href') || '{MAX_CHANNEL_DEEPLINK}';
+        const webUrl = subscribeBtn.getAttribute('data-web-url') || '{MAX_CHANNEL_URL}';
         try {{
-          if (window.WebApp?.openLink) {{
-            window.WebApp.openLink(url);
-            return;
-          }}
+          // Приоритет: открыть канал прямо в приложении MAX по deep-link.
+          window.location.href = deepLink;
+          return;
         }} catch (_e) {{
           // fallback ниже
         }}
-        window.open(url, '_blank', 'noopener,noreferrer');
+        window.open(webUrl, '_blank', 'noopener,noreferrer');
       }};
 
       checkBtn.onclick = async () => {{

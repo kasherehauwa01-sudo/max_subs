@@ -35,7 +35,7 @@
 Если отправка изображения не удалась, бот отправляет текст купона и предупреждение (без цифрового кода).
 
 Если MAX API вернёт нестандартный формат ответа после загрузки файла, бот попробует извлечь `token` из нескольких возможных полей и вложенных структур.
-Кнопка «Подписаться на канал» ведёт по ссылке `MAX_CHANNEL_URL` (по умолчанию `https://web.max.ru/-72559954357735`) и в miniapp открывается через `WebApp.openLink` с fallback в обычный `window.open`.
+Кнопка «Подписаться на канал» в miniapp сначала открывает deep-link `MAX_CHANNEL_DEEPLINK` (по умолчанию `max://chat/-72559954357735`) — это открывает канал внутри приложения MAX. Если deep-link не сработал, используется fallback на `MAX_CHANNEL_URL` (по умолчанию `https://web.max.ru/-72559954357735`).
 
 Endpoint'ы миниприложения:
 - `GET /miniapp` — HTML-интерфейс с кнопками.
@@ -199,7 +199,8 @@ MAX_API_BASE_URL=https://platform-api.max.ru
   - `MAX_DEDUP_TTL_SECONDS` (например, `3600`, TTL dedup ключей)
   - `MAX_WEBHOOK_UPDATE_TYPES` (например, `message_created,bot_started,message_callback`)
   - `MAX_CHANNEL_CHAT_ID` (по умолчанию `-72559954357735`, канал для проверки подписки)
-  - `MAX_CHANNEL_URL` (ссылка для кнопки «Подписаться на канал»)
+  - `MAX_CHANNEL_DEEPLINK` (deep-link канала для открытия внутри приложения MAX, например `max://chat/-72559954357735`)
+  - `MAX_CHANNEL_URL` (fallback web-ссылка на канал, если deep-link не сработал)
   - `MAX_WEB_APP` (опционально, username бота для поля `web_app` в кнопке `open_app`; если пусто — отправляется fallback `link` на `/miniapp`)
   - `PUBLIC_BASE_URL` (публичный URL сервиса для миниприложения)
   - `MAX_STARTUP_SELF_CHECK` (`true/false`, проверка `GET /me` при старте)
