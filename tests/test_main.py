@@ -58,6 +58,11 @@ class TestMainHelpers(unittest.TestCase):
         self.assertIn("message_created", update_types)
         self.assertIn("bot_started", update_types)
 
+    def test_get_channel_id_candidates_contains_signed_and_unsigned(self) -> None:
+        candidates = main.get_channel_id_candidates()
+        self.assertIn("-72559954357735", candidates)
+        self.assertIn("72559954357735", candidates)
+
     def test_miniapp_url_from_webhook_url(self) -> None:
         original = main.MAX_WEBHOOK_URL
         try:

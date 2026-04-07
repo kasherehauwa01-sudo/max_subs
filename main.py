@@ -44,6 +44,22 @@ MAX_CHANNEL_URL = os.getenv("MAX_CHANNEL_URL", f"max://chat/{MAX_CHANNEL_CHAT_ID
 MAX_WEB_APP = os.getenv("MAX_WEB_APP")
 ACTIVE_WEBHOOK_UPDATE_TYPES: list[str] = []
 
+
+def get_channel_id_candidates() -> list[str]:
+    """
+    Возвращает варианты channel/chat id для запросов в MAX API.
+    Практика показывает, что web-ссылка канала может быть со знаком "-", а API
+    в некоторых методах ожидает id без знака. Поэтому пробуем оба варианта.
+    """
+    raw = (MAX_CHANNEL_CHAT_ID or "").strip()
+    if not raw:
+        return []
+    variants = [raw]
+    unsigned = raw.lstrip("-")
+    if unsigned and unsigned not in variants:
+        variants.append(unsigned)
+    return variants
+
 def _find_token_recursive(value: Any) -> Optional[str]:
     if isinstance(value, dict):
         token_value = value.get("token")
@@ -458,15 +474,19 @@ def is_user_subscribed_to_channel(user_id: str) -> bool:
     if not MAX_BOT_TOKEN:
         raise RuntimeError("MAX_BOT_TOKEN не задан в переменных окружения")
 
-    candidates = [
-        f"{MAX_API_BASE_URL}/chats/{MAX_CHANNEL_CHAT_ID}/members/{user_id}",
-        f"{MAX_API_BASE_URL}/chats/{MAX_CHANNEL_CHAT_ID}/members",
-        f"{MAX_API_BASE_URL}/chats/{MAX_CHANNEL_CHAT_ID}/subscribers/{user_id}",
-        f"{MAX_API_BASE_URL}/chats/{MAX_CHANNEL_CHAT_ID}/subscribers",
-        f"{MAX_API_BASE_URL}/channels/{MAX_CHANNEL_CHAT_ID}/members/{user_id}",
-        f"{MAX_API_BASE_URL}/channels/{MAX_CHANNEL_CHAT_ID}/subscribers/{user_id}",
-        f"{MAX_API_BASE_URL}/channels/{MAX_CHANNEL_CHAT_ID}/subscribers",
-    ]
+    candidates: list[str] = []
+    for channel_id in get_channel_id_candidates():
+        candidates.extend(
+            [
+                f"{MAX_API_BASE_URL}/chats/{channel_id}/members/{user_id}",
+                f"{MAX_API_BASE_URL}/chats/{channel_id}/members",
+                f"{MAX_API_BASE_URL}/chats/{channel_id}/subscribers/{user_id}",
+                f"{MAX_API_BASE_URL}/chats/{channel_id}/subscribers",
+                f"{MAX_API_BASE_URL}/channels/{channel_id}/members/{user_id}",
+                f"{MAX_API_BASE_URL}/channels/{channel_id}/subscribers/{user_id}",
+                f"{MAX_API_BASE_URL}/channels/{channel_id}/subscribers",
+            ]
+        )
     headers = {"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"}
 
     for url in candidates:
@@ -544,10 +564,14 @@ def get_channel_title() -> str:
         return f"chat_id {MAX_CHANNEL_CHAT_ID}"
 
     headers = {"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"}
-    candidates = [
-        f"{MAX_API_BASE_URL}/chats/{MAX_CHANNEL_CHAT_ID}",
-        f"{MAX_API_BASE_URL}/channels/{MAX_CHANNEL_CHAT_ID}",
-    ]
+    candidates: list[str] = []
+    for channel_id in get_channel_id_candidates():
+        candidates.extend(
+            [
+                f"{MAX_API_BASE_URL}/chats/{channel_id}",
+                f"{MAX_API_BASE_URL}/channels/{channel_id}",
+            ]
+        )
     for url in candidates:
         try:
             resp = requests.get(url, headers=headers, timeout=MAX_TIMEOUT_SECONDS)
