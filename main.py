@@ -484,6 +484,7 @@ def is_user_subscribed_to_channel(user_id: str) -> bool:
                 f"{MAX_API_BASE_URL}/chats/{channel_id}/subscribers/{user_id}",
                 f"{MAX_API_BASE_URL}/chats/{channel_id}/subscribers",
                 f"{MAX_API_BASE_URL}/channels/{channel_id}/members/{user_id}",
+                f"{MAX_API_BASE_URL}/channels/{channel_id}/members",
                 f"{MAX_API_BASE_URL}/channels/{channel_id}/subscribers/{user_id}",
                 f"{MAX_API_BASE_URL}/channels/{channel_id}/subscribers",
             ]
@@ -919,14 +920,31 @@ def render_miniapp_html() -> str:
         e.preventDefault();
         const deepLink = subscribeBtn.getAttribute('href') || '{MAX_CHANNEL_DEEPLINK}';
         const webUrl = subscribeBtn.getAttribute('data-web-url') || '{MAX_CHANNEL_URL}';
+        const fallbackToWeb = () => {{
+          window.open(webUrl, '_blank', 'noopener,noreferrer');
+        }};
         try {{
-          // Приоритет: открыть канал прямо в приложении MAX по deep-link.
-          window.location.href = deepLink;
+          // 1) Пробуем нативный метод MAX WebApp (если доступен).
+          if (window.WebApp?.openLink) {{
+            window.WebApp.openLink(deepLink);
+            setTimeout(fallbackToWeb, 1200);
+            return;
+          }}
+        }} catch (_e) {{
+          // Переходим к следующей попытке
+        }}
+
+        try {{
+          // 2) Фолбэк: прямой переход по deep-link.
+          window.location.assign(deepLink);
+          setTimeout(fallbackToWeb, 1200);
           return;
         }} catch (_e) {{
-          // fallback ниже
+          // Финальный fallback ниже
         }}
-        window.open(webUrl, '_blank', 'noopener,noreferrer');
+
+        // 3) Если deep-link не сработал, открываем web-ссылку.
+        fallbackToWeb();
       }};
 
       checkBtn.onclick = async () => {{

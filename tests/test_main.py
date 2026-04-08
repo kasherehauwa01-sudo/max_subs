@@ -79,7 +79,8 @@ class TestMainHelpers(unittest.TestCase):
         self.assertIn("max-web-app.js", html)
         self.assertIn("max://chat/-72559954357735", html)
         self.assertIn("https://web.max.ru/-72559954357735", html)
-        self.assertIn("window.location.href = deepLink", html)
+        self.assertIn("window.WebApp.openLink(deepLink)", html)
+        self.assertIn("window.location.assign(deepLink)", html)
 
     def test_build_miniapp_button_attachments_uses_open_app(self) -> None:
         original_web_app = main.MAX_WEB_APP
