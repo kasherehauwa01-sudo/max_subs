@@ -1,10 +1,21 @@
 import unittest
 from datetime import date
+from unittest.mock import patch
 
 import main
 
 
 class TestMainHelpers(unittest.TestCase):
+    class _Resp:
+        def __init__(self, status_code: int, payload: dict | None = None):
+            self.status_code = status_code
+            self._payload = payload or {}
+            self.content = b"{}"
+            self.text = ""
+
+        def json(self):
+            return self._payload
+
     def test_extract_user_id_from_message_sender(self) -> None:
         payload = {"message": {"sender": {"user_id": 12345}}}
         self.assertEqual(main.extract_user_id(payload), "12345")
@@ -112,6 +123,15 @@ class TestMainHelpers(unittest.TestCase):
         self.assertTrue(main.is_subscription_confirmed({"is_subscribed": True}, "1"))
         self.assertTrue(main.is_subscription_confirmed({"member": "joined"}, "1"))
         self.assertTrue(main.is_subscription_confirmed({"status": "subscriber"}, "1"))
+
+    def test_get_user_subscription_state_unknown_on_api_errors(self) -> None:
+        original_token = main.MAX_BOT_TOKEN
+        try:
+            main.MAX_BOT_TOKEN = "test-token"
+            with patch("main.requests.get", return_value=self._Resp(400)):
+                self.assertEqual(main.get_user_subscription_state("1"), "unknown")
+        finally:
+            main.MAX_BOT_TOKEN = original_token
 
 if __name__ == "__main__":
     unittest.main()

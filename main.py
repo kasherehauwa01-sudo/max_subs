@@ -374,11 +374,23 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
 
 def _subscription_watch_job(user_id: str, attempts: int = 60, interval_seconds: float = 3.0) -> None:
     try:
+        unknown_count = 0
         for _ in range(attempts):
-            if is_user_subscribed_to_channel(user_id):
+            state = get_user_subscription_state(user_id)
+            if state == "subscribed":
                 logger.info("Subscription watcher: subscribed user_id=%s, sending coupon", user_id)
                 send_coupon(user_id=user_id, chat_id=None)
                 return
+            if state == "unknown":
+                unknown_count += 1
+                # Если API долго не даёт внятного ответа (массовые 400), не блокируем пользователя.
+                if unknown_count >= 6:
+                    logger.warning(
+                        "Subscription watcher: state=unknown too long for user_id=%s, sending coupon optimistically",
+                        user_id,
+                    )
+                    send_coupon(user_id=user_id, chat_id=None)
+                    return
             time.sleep(interval_seconds)
         logger.info("Subscription watcher timeout for user_id=%s", user_id)
     except Exception as exc:
@@ -499,7 +511,13 @@ def send_miniapp_entry(user_id: Optional[str], chat_id: Optional[str]) -> None:
         )
 
 
-def is_user_subscribed_to_channel(user_id: str) -> bool:
+def get_user_subscription_state(user_id: str) -> str:
+    """
+    Возвращает одно из значений:
+    - subscribed
+    - not_subscribed
+    - unknown (если MAX API не дал однозначного ответа, например массовые 400/5xx)
+    """
     if not MAX_BOT_TOKEN:
         raise RuntimeError("MAX_BOT_TOKEN не задан в переменных окружения")
 
@@ -518,6 +536,8 @@ def is_user_subscribed_to_channel(user_id: str) -> bool:
             ]
         )
     headers = {"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"}
+    had_api_errors = False
+    had_success_response = False
 
     for url in candidates:
         try:
@@ -527,19 +547,30 @@ def is_user_subscribed_to_channel(user_id: str) -> bool:
                 continue
             if resp.status_code >= 400:
                 logger.info("Subscription check endpoint %s returned status=%s", url, resp.status_code)
+                had_api_errors = True
                 continue
+            had_success_response = True
 
             # Для endpoint вида /members/{user_id} или /subscribers/{user_id} успешный 200 обычно уже означает,
             # что пользователь найден среди участников.
             if not (url.endswith("/members") or url.endswith("/subscribers")):
-                return True
+                return "subscribed"
 
             payload = resp.json() if resp.content else {}
             if payload and is_subscription_confirmed(payload, user_id):
-                return True
+                return "subscribed"
         except Exception:
+            had_api_errors = True
             continue
-    return False
+    if had_success_response:
+        return "not_subscribed"
+    if had_api_errors:
+        return "unknown"
+    return "not_subscribed"
+
+
+def is_user_subscribed_to_channel(user_id: str) -> bool:
+    return get_user_subscription_state(user_id) == "subscribed"
 
 
 def contains_user_id(value: Any, user_id: str) -> bool:
@@ -774,7 +805,11 @@ def process_update(payload: dict[str, Any]) -> None:
             send_miniapp_entry(user_id=user_id, chat_id=chat_id)
             return
         if message_text in {"купон", "/купон", "coupon", "/coupon"}:
-            send_miniapp_entry(user_id=user_id, chat_id=chat_id)
+            send_max_message(
+                text="Откройте миниприложение через кнопку «Открыть» в боте, чтобы получить купон.",
+                user_id=user_id,
+                chat_id=chat_id,
+            )
             return
         if message_text in {"id", "айди", "/id"}:
             if user_id:
@@ -1161,13 +1196,15 @@ def miniapp_page() -> str:
 
 @app.get("/miniapp/status")
 def miniapp_status(user_id: str) -> JSONResponse:
-    subscribed = is_user_subscribed_to_channel(user_id=user_id)
+    subscription_state = get_user_subscription_state(user_id=user_id)
+    subscribed = subscription_state == "subscribed"
     channel_title = get_channel_title()
-    message = (
-        f'Вы подписаны на канал "{channel_title}"'
-        if subscribed
-        else f'Подписка на канал "{channel_title}" не найдена'
-    )
+    if subscription_state == "subscribed":
+        message = f'Вы подписаны на канал "{channel_title}"'
+    elif subscription_state == "unknown":
+        message = f'Не удалось однозначно проверить подписку на канал "{channel_title}". Попробуйте ещё раз.'
+    else:
+        message = f'Подписка на канал "{channel_title}" не найдена'
     if not subscribed:
         logger.info("Subscription check is false for user_id=%s channel_chat_id=%s", user_id, MAX_CHANNEL_CHAT_ID)
     return JSONResponse(
@@ -1175,6 +1212,7 @@ def miniapp_status(user_id: str) -> JSONResponse:
             "ok": True,
             "user_id": user_id,
             "subscribed": subscribed,
+            "subscription_state": subscription_state,
             "channel_chat_id": MAX_CHANNEL_CHAT_ID,
             "channel_title": channel_title,
             "message": message,
@@ -1198,8 +1236,11 @@ async def miniapp_get_coupon(request: Request) -> JSONResponse:
     user_id = str(body.get("user_id") or "")
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id обязателен")
-    if not is_user_subscribed_to_channel(user_id=user_id):
+    subscription_state = get_user_subscription_state(user_id=user_id)
+    if subscription_state == "not_subscribed":
         return JSONResponse({"ok": False, "reason": "not_subscribed", "channel_chat_id": MAX_CHANNEL_CHAT_ID}, status_code=403)
+    if subscription_state == "unknown":
+        logger.warning("Coupon request allowed with subscription_state=unknown for user_id=%s", user_id)
     send_coupon(user_id=user_id, chat_id=None)
     return JSONResponse({"ok": True, "sent": True})
 
