@@ -83,6 +83,8 @@ app = FastAPI(title="MAX ID Bot", version="1.2.0")
 # Простой in-memory dedup для повторной доставки webhook (at-least-once).
 _processed_updates: dict[str, float] = {}
 _dedup_lock = threading.Lock()
+_subscription_watchers: set[str] = set()
+_watchers_lock = threading.Lock()
 
 
 def _extract_by_paths(payload: dict[str, Any], paths: list[str]) -> Optional[Any]:
@@ -368,6 +370,32 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
             user_id=user_id,
             chat_id=chat_id,
         )
+
+
+def _subscription_watch_job(user_id: str, attempts: int = 60, interval_seconds: float = 3.0) -> None:
+    try:
+        for _ in range(attempts):
+            if is_user_subscribed_to_channel(user_id):
+                logger.info("Subscription watcher: subscribed user_id=%s, sending coupon", user_id)
+                send_coupon(user_id=user_id, chat_id=None)
+                return
+            time.sleep(interval_seconds)
+        logger.info("Subscription watcher timeout for user_id=%s", user_id)
+    except Exception as exc:
+        logger.exception("Subscription watcher failed for user_id=%s: %s", user_id, exc)
+    finally:
+        with _watchers_lock:
+            _subscription_watchers.discard(user_id)
+
+
+def start_subscription_watch(user_id: str) -> bool:
+    with _watchers_lock:
+        if user_id in _subscription_watchers:
+            return False
+        _subscription_watchers.add(user_id)
+    worker = threading.Thread(target=_subscription_watch_job, args=(user_id,), daemon=True)
+    worker.start()
+    return True
 
 
 def get_miniapp_url() -> Optional[str]:
@@ -967,11 +995,24 @@ def render_miniapp_html() -> str:
         }}, 3000);
       }};
 
-      subscribeBtn.onclick = (e) => {{
+      subscribeBtn.onclick = async (e) => {{
         e.preventDefault();
+        if (!detectedUserId) {{
+          statusEl.textContent = 'Не удалось определить user_id. Откройте миниприложение из чата MAX.';
+          return;
+        }}
         const deepLink = subscribeBtn.getAttribute('href') || '{MAX_CHANNEL_DEEPLINK}';
         const webUrl = subscribeBtn.getAttribute('data-web-url') || '{MAX_CHANNEL_URL}';
         statusEl.textContent = 'Открываем канал. После нажатия «Подписаться» купон отправится автоматически...';
+        try {{
+          await fetch('/miniapp/start-subscribe-watch', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: JSON.stringify({{ user_id: detectedUserId }})
+          }});
+        }} catch (_e) {{
+          // Локальный watcher всё равно запустим ниже.
+        }}
         startSubscribeAutoCouponWatcher();
         try {{
           // 1) Пробуем нативный метод MAX WebApp (если доступен).
@@ -1139,6 +1180,16 @@ def miniapp_status(user_id: str) -> JSONResponse:
             "message": message,
         }
     )
+
+
+@app.post("/miniapp/start-subscribe-watch")
+async def miniapp_start_subscribe_watch(request: Request) -> JSONResponse:
+    body = await request.json()
+    user_id = str(body.get("user_id") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id обязателен")
+    started = start_subscription_watch(user_id)
+    return JSONResponse({"ok": True, "started": started, "user_id": user_id})
 
 
 @app.post("/miniapp/get-coupon")
