@@ -663,9 +663,11 @@ def get_effective_update_types() -> list[str]:
 
 def auto_register_webhook_on_startup() -> None:
     effective_webhook_url = get_effective_webhook_url()
+    webhook_url_source = "MAX_WEBHOOK_URL" if MAX_WEBHOOK_URL else ("RAILWAY_PUBLIC_DOMAIN" if RAILWAY_PUBLIC_DOMAIN else "not_set")
     logger.info(
-        "Startup config: token_set=%s webhook_url=%s effective_webhook_url=%s auto_register=%s update_types=%s secret_set=%s self_check=%s",
+        "Startup config: token_set=%s webhook_url_source=%s configured_webhook_url=%s effective_webhook_url=%s auto_register=%s update_types=%s secret_set=%s self_check=%s",
         bool(MAX_BOT_TOKEN),
+        webhook_url_source,
         MAX_WEBHOOK_URL or "<empty>",
         effective_webhook_url or "<empty>",
         MAX_WEBHOOK_AUTO_REGISTER,
