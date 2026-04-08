@@ -909,6 +909,7 @@ def render_miniapp_html() -> str:
         ).toString();
       }};
       const detectedUserId = getDetectedUserId();
+      const SUBSCRIBE_WAIT_KEY = 'await_subscribe_coupon_user_id';
       uidLabel.textContent = detectedUserId
         ? `user_id: ${{detectedUserId}}`
         : 'user_id: не определён (откройте miniapp кнопкой из чата с ботом)';
@@ -918,10 +919,60 @@ def render_miniapp_html() -> str:
         showCouponBtn.className = enabled ? 'btn-primary' : 'btn-disabled';
       }};
 
+      const fetchSubscriptionStatus = async () => {{
+        const res = await fetch(`/miniapp/status?user_id=${{encodeURIComponent(detectedUserId)}}`);
+        return res.json();
+      }};
+
+      const requestCoupon = async () => {{
+        const res = await fetch('/miniapp/get-coupon', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ user_id: detectedUserId }})
+        }});
+        const data = await res.json();
+        return {{ ok: res.ok && data.ok, data }};
+      }};
+
+      const startSubscribeAutoCouponWatcher = () => {{
+        if (!detectedUserId) return;
+        localStorage.setItem(SUBSCRIBE_WAIT_KEY, detectedUserId);
+        let attempts = 0;
+        const maxAttempts = 60; // ~3 минуты при интервале 3 сек
+        const timer = setInterval(async () => {{
+          attempts += 1;
+          try {{
+            const statusData = await fetchSubscriptionStatus();
+            if (statusData.subscribed) {{
+              clearInterval(timer);
+              localStorage.removeItem(SUBSCRIBE_WAIT_KEY);
+              setCouponEnabled(true);
+              subscribeBtn.style.display = 'none';
+              statusEl.textContent = 'Подписка найдена ✅ Отправляем купон...';
+              const couponResult = await requestCoupon();
+              statusEl.textContent = couponResult.ok
+                ? 'Купон отправлен в чат с ботом ✅'
+                : 'Подписка найдена, но отправка купона не удалась. Нажмите «Показать купон».';
+              return;
+            }}
+          }} catch (_e) {{
+            // Игнорируем временные ошибки и продолжаем polling.
+          }}
+
+          if (attempts >= maxAttempts) {{
+            clearInterval(timer);
+            localStorage.removeItem(SUBSCRIBE_WAIT_KEY);
+            statusEl.textContent = 'Не удалось подтвердить подписку автоматически. Нажмите «Проверить подписку».';
+          }}
+        }}, 3000);
+      }};
+
       subscribeBtn.onclick = (e) => {{
         e.preventDefault();
         const deepLink = subscribeBtn.getAttribute('href') || '{MAX_CHANNEL_DEEPLINK}';
         const webUrl = subscribeBtn.getAttribute('data-web-url') || '{MAX_CHANNEL_URL}';
+        statusEl.textContent = 'Открываем канал. После нажатия «Подписаться» купон отправится автоматически...';
+        startSubscribeAutoCouponWatcher();
         try {{
           // 1) Пробуем нативный метод MAX WebApp (если доступен).
           if (window.WebApp?.openLink) {{
@@ -950,8 +1001,7 @@ def render_miniapp_html() -> str:
           return;
         }}
         statusEl.textContent = 'Проверяем подписку...';
-        const res = await fetch(`/miniapp/status?user_id=${{encodeURIComponent(detectedUserId)}}`);
-        const data = await res.json();
+        const data = await fetchSubscriptionStatus();
         if (data.subscribed) {{
           setCouponEnabled(true);
           subscribeBtn.style.display = 'none';
@@ -969,18 +1019,18 @@ def render_miniapp_html() -> str:
           return;
         }}
         statusEl.textContent = 'Отправляем купон...';
-        const res = await fetch('/miniapp/get-coupon', {{
-          method: 'POST',
-          headers: {{ 'Content-Type': 'application/json' }},
-          body: JSON.stringify({{ user_id: detectedUserId }})
-        }});
-        const data = await res.json();
-        if (res.ok && data.ok) {{
+        const result = await requestCoupon();
+        if (result.ok) {{
           statusEl.textContent = 'Купон отправлен в чат с ботом ✅';
         }} else {{
           statusEl.textContent = 'Не удалось отправить купон. Проверьте подписку и попробуйте снова.';
         }}
       }};
+
+      if (detectedUserId && localStorage.getItem(SUBSCRIBE_WAIT_KEY) === detectedUserId) {{
+        statusEl.textContent = 'Проверяем подписку после возврата в miniapp...';
+        startSubscribeAutoCouponWatcher();
+      }}
     </script>
   </body>
 </html>
