@@ -915,17 +915,13 @@ def render_miniapp_html() -> str:
         <p>Проверьте подписку и получите купон.</p>
         <div id="uidLabel" class="uid">user_id: определяем...</div>
         <div class="row">
-          <button id="checkBtn" class="btn-secondary">Проверить подписку</button>
-          <button id="showCouponBtn" class="btn-disabled" disabled>Показать купон</button>
-          <a id="subscribeBtn" href="{MAX_CHANNEL_DEEPLINK}" data-web-url="{MAX_CHANNEL_URL}" class="btn-link btn-primary" style="display:none;">Подписаться на канал</a>
+          <a id="subscribeBtn" href="{MAX_CHANNEL_DEEPLINK}" data-web-url="{MAX_CHANNEL_URL}" class="btn-link btn-primary">Подписаться на канал</a>
         </div>
-        <div id="status" class="status">Статус: ожидаем проверку подписки.</div>
+        <div id="status" class="status">Статус: нажмите «Подписаться на канал».</div>
       </div>
     </div>
 
     <script>
-      const checkBtn = document.getElementById('checkBtn');
-      const showCouponBtn = document.getElementById('showCouponBtn');
       const subscribeBtn = document.getElementById('subscribeBtn');
       const statusEl = document.getElementById('status');
       const uidLabel = document.getElementById('uidLabel');
@@ -958,26 +954,6 @@ def render_miniapp_html() -> str:
       uidLabel.textContent = detectedUserId
         ? `user_id: ${{detectedUserId}}`
         : 'user_id: не определён (откройте miniapp кнопкой из чата с ботом)';
-
-      const setCouponEnabled = (enabled) => {{
-        showCouponBtn.disabled = !enabled;
-        showCouponBtn.className = enabled ? 'btn-primary' : 'btn-disabled';
-      }};
-
-      const fetchSubscriptionStatus = async () => {{
-        const res = await fetch(`/miniapp/status?user_id=${{encodeURIComponent(detectedUserId)}}`);
-        return res.json();
-      }};
-
-      const requestCoupon = async () => {{
-        const res = await fetch('/miniapp/get-coupon', {{
-          method: 'POST',
-          headers: {{ 'Content-Type': 'application/json' }},
-          body: JSON.stringify({{ user_id: detectedUserId }})
-        }});
-        const data = await res.json();
-        return {{ ok: res.ok && data.ok, data }};
-      }};
 
       subscribeBtn.onclick = async (e) => {{
         e.preventDefault();
@@ -1023,38 +999,6 @@ def render_miniapp_html() -> str:
 
         // 3) Если deep-link не сработал (редкий случай), открываем web-ссылку.
         window.open(webUrl, '_blank', 'noopener,noreferrer');
-      }};
-
-      checkBtn.onclick = async () => {{
-        if (!detectedUserId) {{
-          statusEl.textContent = 'Не удалось определить user_id. Откройте миниприложение из чата MAX.';
-          return;
-        }}
-        statusEl.textContent = 'Проверяем подписку...';
-        const data = await fetchSubscriptionStatus();
-        if (data.subscribed) {{
-          setCouponEnabled(true);
-          subscribeBtn.style.display = 'none';
-          statusEl.textContent = `${{data.message}} ✅ Нажмите «Показать купон».`;
-        }} else {{
-          setCouponEnabled(false);
-          subscribeBtn.style.display = 'inline-flex';
-          statusEl.textContent = `${{data.message}}`;
-        }}
-      }};
-
-      showCouponBtn.onclick = async () => {{
-        if (!detectedUserId) {{
-          statusEl.textContent = 'Не удалось определить user_id. Откройте миниприложение из чата MAX.';
-          return;
-        }}
-        statusEl.textContent = 'Отправляем купон...';
-        const result = await requestCoupon();
-        if (result.ok) {{
-          statusEl.textContent = 'Купон отправлен в чат с ботом ✅';
-        }} else {{
-          statusEl.textContent = 'Не удалось отправить купон. Проверьте подписку и попробуйте снова.';
-        }}
       }};
 
     </script>

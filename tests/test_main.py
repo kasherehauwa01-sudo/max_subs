@@ -82,9 +82,11 @@ class TestMainHelpers(unittest.TestCase):
         finally:
             main.MAX_WEBHOOK_URL = original
 
-    def test_render_miniapp_contains_show_coupon_button(self) -> None:
+    def test_render_miniapp_contains_only_subscribe_button(self) -> None:
         html = main.render_miniapp_html()
-        self.assertIn("Показать купон", html)
+        self.assertIn("Подписаться на канал", html)
+        self.assertNotIn("Проверить подписку", html)
+        self.assertNotIn('id="showCouponBtn"', html)
         self.assertNotIn('placeholder="Введите user_id"', html)
         self.assertIn("initDataUnsafe", html)
         self.assertIn("max-web-app.js", html)
