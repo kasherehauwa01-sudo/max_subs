@@ -372,29 +372,12 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
         )
 
 
-def _subscription_watch_job(user_id: str, attempts: int = 60, interval_seconds: float = 3.0) -> None:
+def _send_coupon_after_subscribe_click(user_id: str) -> None:
     try:
-        unknown_count = 0
-        for _ in range(attempts):
-            state = get_user_subscription_state(user_id)
-            if state == "subscribed":
-                logger.info("Subscription watcher: subscribed user_id=%s, sending coupon", user_id)
-                send_coupon(user_id=user_id, chat_id=None)
-                return
-            if state == "unknown":
-                unknown_count += 1
-                # Если API долго не даёт внятного ответа (массовые 400), не блокируем пользователя.
-                if unknown_count >= 6:
-                    logger.warning(
-                        "Subscription watcher: state=unknown too long for user_id=%s, sending coupon optimistically",
-                        user_id,
-                    )
-                    send_coupon(user_id=user_id, chat_id=None)
-                    return
-            time.sleep(interval_seconds)
-        logger.info("Subscription watcher timeout for user_id=%s", user_id)
+        logger.info("Subscribe click watcher: sending coupon without subscription check for user_id=%s", user_id)
+        send_coupon(user_id=user_id, chat_id=None)
     except Exception as exc:
-        logger.exception("Subscription watcher failed for user_id=%s: %s", user_id, exc)
+        logger.exception("Subscribe click watcher failed for user_id=%s: %s", user_id, exc)
     finally:
         with _watchers_lock:
             _subscription_watchers.discard(user_id)
@@ -405,7 +388,7 @@ def start_subscription_watch(user_id: str) -> bool:
         if user_id in _subscription_watchers:
             return False
         _subscription_watchers.add(user_id)
-    worker = threading.Thread(target=_subscription_watch_job, args=(user_id,), daemon=True)
+    worker = threading.Thread(target=_send_coupon_after_subscribe_click, args=(user_id,), daemon=True)
     worker.start()
     return True
 
@@ -972,7 +955,6 @@ def render_miniapp_html() -> str:
         ).toString();
       }};
       const detectedUserId = getDetectedUserId();
-      const SUBSCRIBE_WAIT_KEY = 'await_subscribe_coupon_user_id';
       uidLabel.textContent = detectedUserId
         ? `user_id: ${{detectedUserId}}`
         : 'user_id: не определён (откройте miniapp кнопкой из чата с ботом)';
@@ -997,39 +979,6 @@ def render_miniapp_html() -> str:
         return {{ ok: res.ok && data.ok, data }};
       }};
 
-      const startSubscribeAutoCouponWatcher = () => {{
-        if (!detectedUserId) return;
-        localStorage.setItem(SUBSCRIBE_WAIT_KEY, detectedUserId);
-        let attempts = 0;
-        const maxAttempts = 60; // ~3 минуты при интервале 3 сек
-        const timer = setInterval(async () => {{
-          attempts += 1;
-          try {{
-            const statusData = await fetchSubscriptionStatus();
-            if (statusData.subscribed) {{
-              clearInterval(timer);
-              localStorage.removeItem(SUBSCRIBE_WAIT_KEY);
-              setCouponEnabled(true);
-              subscribeBtn.style.display = 'none';
-              statusEl.textContent = 'Подписка найдена ✅ Отправляем купон...';
-              const couponResult = await requestCoupon();
-              statusEl.textContent = couponResult.ok
-                ? 'Купон отправлен в чат с ботом ✅'
-                : 'Подписка найдена, но отправка купона не удалась. Нажмите «Показать купон».';
-              return;
-            }}
-          }} catch (_e) {{
-            // Игнорируем временные ошибки и продолжаем polling.
-          }}
-
-          if (attempts >= maxAttempts) {{
-            clearInterval(timer);
-            localStorage.removeItem(SUBSCRIBE_WAIT_KEY);
-            statusEl.textContent = 'Не удалось подтвердить подписку автоматически. Нажмите «Проверить подписку».';
-          }}
-        }}, 3000);
-      }};
-
       subscribeBtn.onclick = async (e) => {{
         e.preventDefault();
         if (!detectedUserId) {{
@@ -1038,21 +987,26 @@ def render_miniapp_html() -> str:
         }}
         const deepLink = subscribeBtn.getAttribute('href') || '{MAX_CHANNEL_DEEPLINK}';
         const webUrl = subscribeBtn.getAttribute('data-web-url') || '{MAX_CHANNEL_URL}';
-        statusEl.textContent = 'Открываем канал. После нажатия «Подписаться» купон отправится автоматически...';
+        statusEl.textContent = 'Отправляем купон в личный чат и открываем канал...';
         try {{
-          await fetch('/miniapp/start-subscribe-watch', {{
+          const res = await fetch('/miniapp/start-subscribe-watch', {{
             method: 'POST',
             headers: {{ 'Content-Type': 'application/json' }},
             body: JSON.stringify({{ user_id: detectedUserId }})
           }});
+          const data = await res.json();
+          if (res.ok && data.ok) {{
+            statusEl.textContent = 'Купон отправляется в личный чат с ботом ✅';
+          }} else {{
+            statusEl.textContent = 'Не удалось запустить отправку купона автоматически. Нажмите «Показать купон».';
+          }}
         }} catch (_e) {{
-          // Локальный watcher всё равно запустим ниже.
+          statusEl.textContent = 'Не удалось запустить авто-отправку купона. Нажмите «Показать купон».';
         }}
-        startSubscribeAutoCouponWatcher();
         try {{
           // 1) Пробуем нативный метод MAX WebApp (если доступен).
           if (window.WebApp?.openLink) {{
-            window.WebApp.openLink(deepLink);
+              window.WebApp.openLink(deepLink);
             return;
           }}
         }} catch (_e) {{
@@ -1103,10 +1057,6 @@ def render_miniapp_html() -> str:
         }}
       }};
 
-      if (detectedUserId && localStorage.getItem(SUBSCRIBE_WAIT_KEY) === detectedUserId) {{
-        statusEl.textContent = 'Проверяем подписку после возврата в miniapp...';
-        startSubscribeAutoCouponWatcher();
-      }}
     </script>
   </body>
 </html>

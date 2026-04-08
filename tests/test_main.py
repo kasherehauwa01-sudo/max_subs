@@ -93,8 +93,6 @@ class TestMainHelpers(unittest.TestCase):
         self.assertIn("window.WebApp.openLink(deepLink)", html)
         self.assertIn("window.location.assign(deepLink)", html)
         self.assertNotIn("setTimeout(fallbackToWeb", html)
-        self.assertIn("await_subscribe_coupon_user_id", html)
-        self.assertIn("startSubscribeAutoCouponWatcher", html)
         self.assertIn("/miniapp/start-subscribe-watch", html)
 
     def test_build_miniapp_button_attachments_uses_open_app(self) -> None:
