@@ -77,7 +77,7 @@ class TestMainHelpers(unittest.TestCase):
         self.assertNotIn('placeholder="Введите user_id"', html)
         self.assertIn("initDataUnsafe", html)
         self.assertIn("max-web-app.js", html)
-        self.assertIn("max://chat/-72559954357735", html)
+        self.assertIn("https://max.ru/id344309962847_biz", html)
         self.assertIn("https://web.max.ru/-72559954357735", html)
         self.assertIn("window.WebApp.openLink(deepLink)", html)
         self.assertIn("window.location.assign(deepLink)", html)
