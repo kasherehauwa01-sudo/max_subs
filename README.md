@@ -132,8 +132,15 @@ curl http://localhost:8000/health/max
    - `GOOGLE_SHEETS_ENABLED=true`
    - `GOOGLE_SHEETS_SPREADSHEET_ID=15nXvYljl4yqNsw_nYLpNzFIo4SLlTQyQDaD2Y77Ll-8`
    - `GOOGLE_SHEETS_WORKSHEET=` (пусто для первого листа или укажите имя листа)
-   - `GOOGLE_SERVICE_ACCOUNT_JSON=<JSON service account в одну строку>`
+   - `GOOGLE_SERVICE_ACCOUNT_JSON=<raw JSON | JSON в кавычках | base64(JSON) | путь к JSON-файлу>`
 6. Перезапустите сервис.
+
+> Если в логах видите `No key could be detected`, обычно причина в `private_key`:
+> в Railway внутри JSON должны быть `\\n` (двойной backslash + n).  
+> Код автоматически преобразует `\\n` в реальные переносы строк перед авторизацией.
+>
+> Для диагностики откройте `GET /health/config` — там в `config.issues` будут причины
+> (например, ошибка разбора `GOOGLE_SERVICE_ACCOUNT_JSON` или отсутствие обязательных полей).
 
 При отправке купона бот добавляет строку:
 - `Дата` — YYYY-MM-DD (UTC)

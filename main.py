@@ -1,4 +1,5 @@
 import hmac
+import base64
 import json
 import logging
 import os
@@ -102,6 +103,42 @@ def _find_token_recursive(value: Any) -> Optional[str]:
             if found:
                 return found
     return None
+
+
+def parse_google_service_account(raw_value: str) -> dict[str, Any]:
+    """
+    Разбирает GOOGLE_SERVICE_ACCOUNT_JSON из env в одном из форматов:
+    - raw JSON;
+    - JSON, обёрнутый в одинарные/двойные кавычки;
+    - base64(JSON);
+    - путь к локальному JSON-файлу.
+    """
+    raw = (raw_value or "").strip()
+    if not raw:
+        raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON пустой")
+
+    # Частый случай для Railway/UI: JSON целиком вставлен как строка в кавычках.
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {"'", '"'}:
+        raw = raw[1:-1].strip()
+
+    # Ещё один частый случай: JSON внутри строки экранирован как {\"key\":\"value\"}.
+    if raw.startswith("{\\"):
+        raw = raw.replace('\\"', '"')
+
+    if raw.startswith("{"):
+        return json.loads(raw)
+
+    if raw.startswith("eyJ"):  # Частый префикс base64(JSON).
+        decoded = base64.b64decode(raw).decode("utf-8")
+        return json.loads(decoded)
+
+    file_path = Path(raw)
+    if file_path.exists():
+        return json.loads(file_path.read_text(encoding="utf-8"))
+
+    raise ValueError(
+        "Не удалось распознать GOOGLE_SERVICE_ACCOUNT_JSON: ожидается JSON, base64(JSON) или путь к JSON-файлу"
+    )
 
 
 app = FastAPI(title="MAX ID Bot", version="1.2.0")
@@ -386,11 +423,9 @@ def log_coupon_event_to_google_sheet(user_id: Optional[str], event_name: str = "
         import gspread  # type: ignore[import-not-found]
         from google.oauth2.service_account import Credentials  # type: ignore[import-not-found]
 
-        account_raw = GOOGLE_SERVICE_ACCOUNT_JSON.strip()
-        if account_raw.startswith("{"):
-            account_info = json.loads(account_raw)
-        else:
-            account_info = json.loads(Path(account_raw).read_text(encoding="utf-8"))
+        account_info = parse_google_service_account(GOOGLE_SERVICE_ACCOUNT_JSON)
+
+        account_info = normalize_service_account_info(account_info)
 
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
@@ -413,6 +448,47 @@ def log_coupon_event_to_google_sheet(user_id: Optional[str], event_name: str = "
         )
     except Exception as exc:
         logger.exception("Не удалось записать событие купона в Google Sheets: %s", exc)
+
+
+def normalize_service_account_info(account_info: dict[str, Any]) -> dict[str, Any]:
+    """
+    Нормализует service account JSON для Railway/env:
+    - заменяет экранированные \\n в private_key на реальные переносы строк.
+    """
+    normalized = dict(account_info)
+    private_key = normalized.get("private_key")
+    if isinstance(private_key, str):
+        normalized["private_key"] = private_key.replace("\\n", "\n")
+    return normalized
+
+
+def get_google_sheets_config_issues() -> list[str]:
+    issues: list[str] = []
+    if not GOOGLE_SHEETS_ENABLED:
+        return issues
+
+    if not GOOGLE_SHEETS_SPREADSHEET_ID:
+        issues.append("GOOGLE_SHEETS_SPREADSHEET_ID is empty")
+    if not GOOGLE_SERVICE_ACCOUNT_JSON:
+        issues.append("GOOGLE_SERVICE_ACCOUNT_JSON is empty")
+        return issues
+
+    try:
+        info = normalize_service_account_info(parse_google_service_account(GOOGLE_SERVICE_ACCOUNT_JSON))
+    except Exception as exc:
+        issues.append(f"GOOGLE_SERVICE_ACCOUNT_JSON parse error: {exc}")
+        return issues
+
+    required_fields = ["type", "project_id", "private_key", "client_email", "token_uri"]
+    for field in required_fields:
+        value = str(info.get(field) or "").strip()
+        if not value:
+            issues.append(f"GOOGLE_SERVICE_ACCOUNT_JSON missing field: {field}")
+
+    private_key = str(info.get("private_key") or "")
+    if private_key and ("BEGIN PRIVATE KEY" not in private_key or "END PRIVATE KEY" not in private_key):
+        issues.append("GOOGLE_SERVICE_ACCOUNT_JSON.private_key looks invalid (missing BEGIN/END PRIVATE KEY)")
+    return issues
 
 
 def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
@@ -1112,6 +1188,7 @@ def health_config() -> JSONResponse:
         issues.append("MAX_BOT_TOKEN is empty")
     if not effective_webhook_url:
         issues.append("webhook url is empty: set MAX_WEBHOOK_URL or RAILWAY_PUBLIC_DOMAIN")
+    issues.extend(get_google_sheets_config_issues())
 
     return JSONResponse(
         {
@@ -1127,6 +1204,10 @@ def health_config() -> JSONResponse:
                 "webhook_update_types": get_effective_update_types(),
                 "active_webhook_update_types": ACTIVE_WEBHOOK_UPDATE_TYPES,
                 "startup_self_check": MAX_STARTUP_SELF_CHECK,
+                "google_sheets_enabled": GOOGLE_SHEETS_ENABLED,
+                "google_sheets_spreadsheet_id_set": bool(GOOGLE_SHEETS_SPREADSHEET_ID),
+                "google_sheets_worksheet": GOOGLE_SHEETS_WORKSHEET,
+                "google_service_account_json_set": bool(GOOGLE_SERVICE_ACCOUNT_JSON),
                 "issues": issues,
             },
         }

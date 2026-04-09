@@ -151,5 +151,28 @@ class TestMainHelpers(unittest.TestCase):
         finally:
             main.GOOGLE_SHEETS_ENABLED = original
 
+    def test_normalize_service_account_info_private_key_newlines(self) -> None:
+        raw = {"private_key": "-----BEGIN PRIVATE KEY-----\\nABC\\n-----END PRIVATE KEY-----\\n"}
+        normalized = main.normalize_service_account_info(raw)
+        self.assertIn("\nABC\n", normalized["private_key"])
+
+    def test_parse_google_service_account_raw_json_in_quotes(self) -> None:
+        value = '"{\\"type\\": \\"service_account\\", \\"project_id\\": \\"p\\", \\"private_key\\": \\"k\\", \\"client_email\\": \\"a@b\\", \\"token_uri\\": \\"https://oauth2.googleapis.com/token\\"}"'
+        parsed = main.parse_google_service_account(value)
+        self.assertEqual(parsed["type"], "service_account")
+        self.assertEqual(parsed["project_id"], "p")
+
+    def test_get_google_sheets_config_issues_parse_error(self) -> None:
+        original_enabled = main.GOOGLE_SHEETS_ENABLED
+        original_sa = main.GOOGLE_SERVICE_ACCOUNT_JSON
+        try:
+            main.GOOGLE_SHEETS_ENABLED = True
+            main.GOOGLE_SERVICE_ACCOUNT_JSON = "not-json-and-not-path"
+            issues = main.get_google_sheets_config_issues()
+            self.assertTrue(any("parse error" in issue for issue in issues))
+        finally:
+            main.GOOGLE_SHEETS_ENABLED = original_enabled
+            main.GOOGLE_SERVICE_ACCOUNT_JSON = original_sa
+
 if __name__ == "__main__":
     unittest.main()
