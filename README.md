@@ -115,6 +115,32 @@ curl http://localhost:8000/health
 curl http://localhost:8000/health/max
 ```
 
+## Интеграция Google Sheets (Railway)
+
+Чтобы писать события отправки купона в таблицу  
+`https://docs.google.com/spreadsheets/d/15nXvYljl4yqNsw_nYLpNzFIo4SLlTQyQDaD2Y77Ll-8/edit?gid=0#gid=0`:
+
+1. В таблице создайте заголовки в строке 1:
+   - `Дата`
+   - `время`
+   - `user_id`
+   - `Событие`
+2. Начиная со 2-й строки бот будет добавлять записи в эти колонки.
+3. Создайте Service Account в Google Cloud и скачайте JSON-ключ.
+4. Дайте этому service account доступ **Editor** к таблице (поделитесь таблицей на e-mail service account).
+5. В Railway добавьте переменные:
+   - `GOOGLE_SHEETS_ENABLED=true`
+   - `GOOGLE_SHEETS_SPREADSHEET_ID=15nXvYljl4yqNsw_nYLpNzFIo4SLlTQyQDaD2Y77Ll-8`
+   - `GOOGLE_SHEETS_WORKSHEET=` (пусто для первого листа или укажите имя листа)
+   - `GOOGLE_SERVICE_ACCOUNT_JSON=<JSON service account в одну строку>`
+6. Перезапустите сервис.
+
+При отправке купона бот добавляет строку:
+- `Дата` — YYYY-MM-DD (UTC)
+- `время` — HH:MM:SS (UTC)
+- `user_id` — id пользователя
+- `Событие` — `Скидка за подписку`
+
 ---
 
 ## Пример входящего webhook JSON

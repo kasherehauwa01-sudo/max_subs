@@ -143,5 +143,13 @@ class TestMainHelpers(unittest.TestCase):
             sleep_mock.assert_called_once_with(6.0)
             send_coupon_mock.assert_called_once_with(user_id="123", chat_id=None)
 
+    def test_log_coupon_event_to_google_sheet_disabled(self) -> None:
+        original = main.GOOGLE_SHEETS_ENABLED
+        try:
+            main.GOOGLE_SHEETS_ENABLED = False
+            main.log_coupon_event_to_google_sheet("123")
+        finally:
+            main.GOOGLE_SHEETS_ENABLED = original
+
 if __name__ == "__main__":
     unittest.main()
