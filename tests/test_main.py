@@ -74,6 +74,10 @@ class TestMainHelpers(unittest.TestCase):
         self.assertIn("-72559954357735", candidates)
         self.assertIn("72559954357735", candidates)
 
+    def test_get_channel_api_targets_contains_channel_slug(self) -> None:
+        targets = main.get_channel_api_targets()
+        self.assertIn("id344309962847_biz", targets)
+
     def test_miniapp_url_from_webhook_url(self) -> None:
         original = main.MAX_WEBHOOK_URL
         try:

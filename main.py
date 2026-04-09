@@ -61,6 +61,28 @@ def get_channel_id_candidates() -> list[str]:
         variants.append(unsigned)
     return variants
 
+
+def get_channel_api_targets() -> list[str]:
+    """
+    Кандидаты идентификаторов канала для MAX API:
+    - chat_id из конфигурации (со знаком и без);
+    - slug/alias из ссылок MAX (`MAX_CHANNEL_DEEPLINK`, `MAX_CHANNEL_URL`), например `id344..._biz`.
+    """
+    targets: list[str] = []
+    for cid in get_channel_id_candidates():
+        if cid and cid not in targets:
+            targets.append(cid)
+
+    for raw_url in (MAX_CHANNEL_DEEPLINK, MAX_CHANNEL_URL):
+        try:
+            parsed = urlparse(raw_url)
+            slug = parsed.path.strip("/")
+            if slug and slug not in targets:
+                targets.append(slug)
+        except Exception:
+            continue
+    return targets
+
 def _find_token_recursive(value: Any) -> Optional[str]:
     if isinstance(value, dict):
         token_value = value.get("token")
@@ -374,8 +396,14 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
 
 def _send_coupon_after_subscribe_click(user_id: str) -> None:
     try:
-        logger.info("Subscribe click watcher: sending coupon without subscription check for user_id=%s", user_id)
-        send_coupon(user_id=user_id, chat_id=None)
+        logger.info("Subscribe click watcher started for user_id=%s", user_id)
+        for _ in range(60):  # ~3 минуты
+            if get_user_subscription_state(user_id) == "subscribed":
+                logger.info("Subscribe click watcher: subscription confirmed for user_id=%s", user_id)
+                send_coupon(user_id=user_id, chat_id=None)
+                return
+            time.sleep(3.0)
+        logger.info("Subscribe click watcher timeout without confirmed subscription for user_id=%s", user_id)
     except Exception as exc:
         logger.exception("Subscribe click watcher failed for user_id=%s: %s", user_id, exc)
     finally:
@@ -505,17 +533,17 @@ def get_user_subscription_state(user_id: str) -> str:
         raise RuntimeError("MAX_BOT_TOKEN не задан в переменных окружения")
 
     candidates: list[str] = []
-    for channel_id in get_channel_id_candidates():
+    for channel_target in get_channel_api_targets():
         candidates.extend(
             [
-                f"{MAX_API_BASE_URL}/chats/{channel_id}/members/{user_id}",
-                f"{MAX_API_BASE_URL}/chats/{channel_id}/members",
-                f"{MAX_API_BASE_URL}/chats/{channel_id}/subscribers/{user_id}",
-                f"{MAX_API_BASE_URL}/chats/{channel_id}/subscribers",
-                f"{MAX_API_BASE_URL}/channels/{channel_id}/members/{user_id}",
-                f"{MAX_API_BASE_URL}/channels/{channel_id}/members",
-                f"{MAX_API_BASE_URL}/channels/{channel_id}/subscribers/{user_id}",
-                f"{MAX_API_BASE_URL}/channels/{channel_id}/subscribers",
+                f"{MAX_API_BASE_URL}/chats/{channel_target}/members/{user_id}",
+                f"{MAX_API_BASE_URL}/chats/{channel_target}/members",
+                f"{MAX_API_BASE_URL}/chats/{channel_target}/subscribers/{user_id}",
+                f"{MAX_API_BASE_URL}/chats/{channel_target}/subscribers",
+                f"{MAX_API_BASE_URL}/channels/{channel_target}/members/{user_id}",
+                f"{MAX_API_BASE_URL}/channels/{channel_target}/members",
+                f"{MAX_API_BASE_URL}/channels/{channel_target}/subscribers/{user_id}",
+                f"{MAX_API_BASE_URL}/channels/{channel_target}/subscribers",
             ]
         )
     headers = {"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"}
@@ -609,7 +637,7 @@ def get_channel_title() -> str:
 
     headers = {"Authorization": MAX_BOT_TOKEN, "Content-Type": "application/json"}
     candidates: list[str] = []
-    for channel_id in get_channel_id_candidates():
+    for channel_id in get_channel_api_targets():
         candidates.extend(
             [
                 f"{MAX_API_BASE_URL}/chats/{channel_id}",
@@ -963,7 +991,7 @@ def render_miniapp_html() -> str:
         }}
         const deepLink = subscribeBtn.getAttribute('href') || '{MAX_CHANNEL_DEEPLINK}';
         const webUrl = subscribeBtn.getAttribute('data-web-url') || '{MAX_CHANNEL_URL}';
-        statusEl.textContent = 'Отправляем купон в личный чат и открываем канал...';
+        statusEl.textContent = 'Открываем канал. Купон придёт в личный чат после подтверждения подписки...';
         try {{
           const res = await fetch('/miniapp/start-subscribe-watch', {{
             method: 'POST',
@@ -972,12 +1000,12 @@ def render_miniapp_html() -> str:
           }});
           const data = await res.json();
           if (res.ok && data.ok) {{
-            statusEl.textContent = 'Купон отправляется в личный чат с ботом ✅';
+            statusEl.textContent = 'Ожидаем подтверждение подписки. Купон отправится автоматически ✅';
           }} else {{
-            statusEl.textContent = 'Не удалось запустить отправку купона автоматически. Нажмите «Показать купон».';
+            statusEl.textContent = 'Не удалось запустить авто-проверку подписки.';
           }}
         }} catch (_e) {{
-          statusEl.textContent = 'Не удалось запустить авто-отправку купона. Нажмите «Показать купон».';
+          statusEl.textContent = 'Не удалось запустить авто-проверку подписки.';
         }}
         try {{
           // 1) Пробуем нативный метод MAX WebApp (если доступен).
