@@ -137,11 +137,10 @@ class TestMainHelpers(unittest.TestCase):
         finally:
             main.MAX_BOT_TOKEN = original_token
 
-    def test_subscribe_click_watcher_fallback_on_unknown(self) -> None:
-        with patch("main.get_user_subscription_state", return_value="unknown"), patch(
-            "main.send_coupon"
-        ) as send_coupon_mock, patch("main.time.sleep", return_value=None):
+    def test_subscribe_click_watcher_sends_coupon_after_delay(self) -> None:
+        with patch("main.send_coupon") as send_coupon_mock, patch("main.time.sleep", return_value=None) as sleep_mock:
             main._send_coupon_after_subscribe_click("123")
+            sleep_mock.assert_called_once_with(6.0)
             send_coupon_mock.assert_called_once_with(user_id="123", chat_id=None)
 
 if __name__ == "__main__":

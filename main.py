@@ -397,28 +397,9 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
 def _send_coupon_after_subscribe_click(user_id: str) -> None:
     try:
         logger.info("Subscribe click watcher started for user_id=%s", user_id)
-        unknown_streak = 0
-        for _ in range(60):  # ~3 минуты
-            state = get_user_subscription_state(user_id)
-            if state == "subscribed":
-                logger.info("Subscribe click watcher: subscription confirmed for user_id=%s", user_id)
-                send_coupon(user_id=user_id, chat_id=None)
-                return
-            if state == "unknown":
-                unknown_streak += 1
-                # Фолбэк: если API долго не может подтвердить подписку (массовые 400),
-                # отправляем купон, чтобы пользователь не зависал без результата.
-                if unknown_streak >= 6:
-                    logger.warning(
-                        "Subscribe click watcher: subscription state unknown too long for user_id=%s, sending coupon fallback",
-                        user_id,
-                    )
-                    send_coupon(user_id=user_id, chat_id=None)
-                    return
-            else:
-                unknown_streak = 0
-            time.sleep(3.0)
-        logger.info("Subscribe click watcher timeout without confirmed subscription for user_id=%s", user_id)
+        time.sleep(6.0)
+        send_coupon(user_id=user_id, chat_id=None)
+        logger.info("Subscribe click watcher: coupon sent for user_id=%s after 6 seconds", user_id)
     except Exception as exc:
         logger.exception("Subscribe click watcher failed for user_id=%s: %s", user_id, exc)
     finally:
@@ -1006,7 +987,7 @@ def render_miniapp_html() -> str:
         }}
         const deepLink = subscribeBtn.getAttribute('href') || '{MAX_CHANNEL_DEEPLINK}';
         const webUrl = subscribeBtn.getAttribute('data-web-url') || '{MAX_CHANNEL_URL}';
-        statusEl.textContent = 'Открываем канал. Купон придёт в личный чат после подтверждения подписки...';
+        statusEl.textContent = 'Открываем канал. Купон придёт в личный чат примерно через 6 секунд...';
         try {{
           const res = await fetch('/miniapp/start-subscribe-watch', {{
             method: 'POST',
@@ -1015,7 +996,7 @@ def render_miniapp_html() -> str:
           }});
           const data = await res.json();
           if (res.ok && data.ok) {{
-            statusEl.textContent = 'Ожидаем подтверждение подписки. Купон отправится автоматически ✅';
+            statusEl.textContent = 'Купон будет отправлен автоматически примерно через 6 секунд ✅';
           }} else {{
             statusEl.textContent = 'Не удалось запустить авто-проверку подписки.';
           }}
@@ -1173,11 +1154,6 @@ async def miniapp_get_coupon(request: Request) -> JSONResponse:
     user_id = str(body.get("user_id") or "")
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id обязателен")
-    subscription_state = get_user_subscription_state(user_id=user_id)
-    if subscription_state == "not_subscribed":
-        return JSONResponse({"ok": False, "reason": "not_subscribed", "channel_chat_id": MAX_CHANNEL_CHAT_ID}, status_code=403)
-    if subscription_state == "unknown":
-        logger.warning("Coupon request allowed with subscription_state=unknown for user_id=%s", user_id)
     send_coupon(user_id=user_id, chat_id=None)
     return JSONResponse({"ok": True, "sent": True})
 
