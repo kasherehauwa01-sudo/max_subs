@@ -148,6 +148,9 @@ _processed_updates: dict[str, float] = {}
 _dedup_lock = threading.Lock()
 _subscription_watchers: set[str] = set()
 _watchers_lock = threading.Lock()
+_coupon_sent_users: set[str] = set()
+_coupon_lock = threading.Lock()
+COUPON_DUPLICATE_ALLOW_USER_IDS = {"24324984"}
 
 
 def _extract_by_paths(payload: dict[str, Any], paths: list[str]) -> Optional[Any]:
@@ -492,6 +495,19 @@ def get_google_sheets_config_issues() -> list[str]:
 
 
 def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
+    normalized_user_id = str(user_id or "").strip()
+    if normalized_user_id and normalized_user_id not in COUPON_DUPLICATE_ALLOW_USER_IDS:
+        with _coupon_lock:
+            if normalized_user_id in _coupon_sent_users:
+                logger.info("Skip duplicate coupon send for user_id=%s", normalized_user_id)
+                send_max_message(
+                    text="Вы уже получили купон 🎁 Повторная отправка для вашего ID отключена.",
+                    user_id=user_id,
+                    chat_id=chat_id,
+                )
+                return
+            _coupon_sent_users.add(normalized_user_id)
+
     log_coupon_event_to_google_sheet(user_id=user_id, event_name="Скидка за подписку")
     barcode_value, expiry_date = get_coupon_barcode_and_expiry()
     coupon_text = build_coupon_text(expiry_date)

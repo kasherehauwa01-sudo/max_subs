@@ -174,5 +174,42 @@ class TestMainHelpers(unittest.TestCase):
             main.GOOGLE_SHEETS_ENABLED = original_enabled
             main.GOOGLE_SERVICE_ACCOUNT_JSON = original_sa
 
+    def test_send_coupon_only_once_per_user(self) -> None:
+        main._coupon_sent_users.clear()
+        with (
+            patch("main.log_coupon_event_to_google_sheet") as log_mock,
+            patch("main.generate_ean13_png_file", return_value="dummy.png"),
+            patch("main.upload_image_and_get_token", return_value="token-1"),
+            patch("main.send_max_message") as send_mock,
+            patch("main.TemporaryDirectory") as temp_dir_mock,
+        ):
+            temp_dir_mock.return_value.__enter__.return_value = "/tmp"
+            temp_dir_mock.return_value.__exit__.return_value = False
+
+            main.send_coupon(user_id="111", chat_id=None)
+            main.send_coupon(user_id="111", chat_id=None)
+
+            self.assertEqual(log_mock.call_count, 1)
+            self.assertEqual(send_mock.call_count, 2)
+            self.assertIn("уже получили купон", send_mock.call_args_list[1].kwargs["text"].lower())
+
+    def test_send_coupon_allow_duplicate_for_special_user(self) -> None:
+        main._coupon_sent_users.clear()
+        with (
+            patch("main.log_coupon_event_to_google_sheet") as log_mock,
+            patch("main.generate_ean13_png_file", return_value="dummy.png"),
+            patch("main.upload_image_and_get_token", return_value="token-1"),
+            patch("main.send_max_message") as send_mock,
+            patch("main.TemporaryDirectory") as temp_dir_mock,
+        ):
+            temp_dir_mock.return_value.__enter__.return_value = "/tmp"
+            temp_dir_mock.return_value.__exit__.return_value = False
+
+            main.send_coupon(user_id="24324984", chat_id=None)
+            main.send_coupon(user_id="24324984", chat_id=None)
+
+            self.assertEqual(log_mock.call_count, 2)
+            self.assertEqual(send_mock.call_count, 2)
+
 if __name__ == "__main__":
     unittest.main()
