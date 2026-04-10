@@ -280,7 +280,9 @@ def build_coupon_text(expiry_date: date) -> str:
         "Дарим вам дополнительную скидку 5%.\n"
         "🛍 Покажите штрихкод на кассе и покупайте с выгодой\n\n"
         f"⏳ Купон действует до {expiry_str}\n"
-        "_⚠ Скидка действует только на товары с белыми ценниками_"
+        "_⚠ Скидка действует только на товары с белыми ценниками. "
+        "Максимальная суммарная скидка - 20%. "
+        "Купон доступен к получению один раз для каждого участника._"
     )
 
 
@@ -492,6 +494,49 @@ def get_google_sheets_config_issues() -> list[str]:
     if private_key and ("BEGIN PRIVATE KEY" not in private_key or "END PRIVATE KEY" not in private_key):
         issues.append("GOOGLE_SERVICE_ACCOUNT_JSON.private_key looks invalid (missing BEGIN/END PRIVATE KEY)")
     return issues
+
+
+def get_coupon_participation_date(user_id: str) -> Optional[str]:
+    """
+    Возвращает дату первого участия пользователя в акции из Google Sheets в формате DD.MM.YYYY.
+    Ищет строку по колонке `user_id` (или `User ID`) и берёт дату из колонки `Дата` (или `date`).
+    """
+    uid = str(user_id or "").strip()
+    if not uid or not GOOGLE_SHEETS_ENABLED or not GOOGLE_SERVICE_ACCOUNT_JSON:
+        return None
+
+    try:
+        import gspread  # type: ignore[import-not-found]
+        from google.oauth2.service_account import Credentials  # type: ignore[import-not-found]
+
+        account_info = normalize_service_account_info(parse_google_service_account(GOOGLE_SERVICE_ACCOUNT_JSON))
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive.readonly",
+        ]
+        credentials = Credentials.from_service_account_info(account_info, scopes=scopes)
+        client = gspread.authorize(credentials)
+        spreadsheet = client.open_by_key(GOOGLE_SHEETS_SPREADSHEET_ID)
+        worksheet = spreadsheet.worksheet(GOOGLE_SHEETS_WORKSHEET) if GOOGLE_SHEETS_WORKSHEET else spreadsheet.sheet1
+
+        records = worksheet.get_all_records()
+        for row in records:
+            row_uid = str(row.get("user_id") or row.get("User ID") or "").strip()
+            if row_uid != uid:
+                continue
+            raw_date = str(row.get("Дата") or row.get("date") or "").strip()
+            if not raw_date:
+                return None
+            try:
+                parsed = datetime.strptime(raw_date, "%Y-%m-%d")
+                return parsed.strftime("%d.%m.%Y")
+            except ValueError:
+                # Если дата в таблице уже в нужном формате или кастомном — отдаём как есть.
+                return raw_date
+    except Exception as exc:
+        logger.exception("Не удалось прочитать дату участия из Google Sheets для user_id=%s: %s", uid, exc)
+
+    return None
 
 
 def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
@@ -971,14 +1016,6 @@ def process_update(payload: dict[str, Any]) -> None:
 
         if not user_id:
             logger.warning("Не удалось извлечь user_id из события")
-            if chat_id:
-                send_max_message(
-                    text=(
-                        "Не удалось определить ваш ID из этого события. "
-                        "Пожалуйста, отправьте сообщение боту в личный диалог."
-                    ),
-                    chat_id=chat_id,
-                )
             return
 
         send_max_message(text=f"Ваш ID: {user_id}", user_id=user_id)
@@ -1058,6 +1095,12 @@ def render_miniapp_html() -> str:
         background: #e5e7eb;
         color: #9ca3af;
         cursor: not-allowed;
+        pointer-events: none;
+      }}
+      .participation-note {{
+        margin-top: 10px;
+        font-size: 14px;
+        color: #b45309;
       }}
       .status {{
         margin-top: 12px;
@@ -1080,8 +1123,9 @@ def render_miniapp_html() -> str:
         <p>Проверьте подписку и получите купон.</p>
         <div id="uidLabel" class="uid">user_id: определяем...</div>
         <div class="row">
-          <a id="subscribeBtn" href="{MAX_CHANNEL_DEEPLINK}" data-web-url="{MAX_CHANNEL_URL}" class="btn-link btn-primary">Подписаться на канал</a>
+          <a id="subscribeBtn" href="{MAX_CHANNEL_DEEPLINK}" data-web-url="{MAX_CHANNEL_URL}" class="btn-link btn-primary">Подпишись на канал и получи доп.скидку -5%</a>
         </div>
+        <div id="participationNote" class="participation-note"></div>
         <div id="status" class="status">Статус: нажмите «Подписаться на канал».</div>
       </div>
     </div>
@@ -1090,6 +1134,7 @@ def render_miniapp_html() -> str:
       const subscribeBtn = document.getElementById('subscribeBtn');
       const statusEl = document.getElementById('status');
       const uidLabel = document.getElementById('uidLabel');
+      const participationNoteEl = document.getElementById('participationNote');
       if (window.WebApp?.ready) {{
         window.WebApp.ready();
       }}
@@ -1116,12 +1161,50 @@ def render_miniapp_html() -> str:
         ).toString();
       }};
       const detectedUserId = getDetectedUserId();
+      let alreadyParticipated = false;
       uidLabel.textContent = detectedUserId
         ? `user_id: ${{detectedUserId}}`
         : 'user_id: не определён (откройте miniapp кнопкой из чата с ботом)';
 
+      const setSubscribeDisabled = (value) => {{
+        alreadyParticipated = Boolean(value);
+        if (alreadyParticipated) {{
+          subscribeBtn.classList.remove('btn-primary');
+          subscribeBtn.classList.add('btn-disabled');
+          subscribeBtn.setAttribute('aria-disabled', 'true');
+          subscribeBtn.setAttribute('tabindex', '-1');
+        }} else {{
+          subscribeBtn.classList.remove('btn-disabled');
+          subscribeBtn.classList.add('btn-primary');
+          subscribeBtn.removeAttribute('aria-disabled');
+          subscribeBtn.removeAttribute('tabindex');
+        }}
+      }};
+
+      const loadParticipationState = async () => {{
+        if (!detectedUserId) return;
+        try {{
+          const res = await fetch(`/miniapp/participation?user_id=${{encodeURIComponent(detectedUserId)}}`);
+          const data = await res.json();
+          if (!res.ok || !data.ok) return;
+          if (data.already_participated) {{
+            setSubscribeDisabled(true);
+            const participationDate = data.participation_date || 'неизвестная дата';
+            participationNoteEl.textContent =
+              `Участие в акции «Скидка за подписку» возможно только один раз. Вы уже принимали участие ${{participationDate}}.`;
+            statusEl.textContent = 'Повторное участие в акции недоступно.';
+          }}
+        }} catch (_e) {{
+          // Ничего не делаем: оставляем интерфейс рабочим даже при временных сбоях сети.
+        }}
+      }};
+      loadParticipationState();
+
       subscribeBtn.onclick = async (e) => {{
         e.preventDefault();
+        if (alreadyParticipated) {{
+          return;
+        }}
         if (!detectedUserId) {{
           statusEl.textContent = 'Не удалось определить user_id. Откройте миниприложение из чата MAX.';
           return;
@@ -1280,6 +1363,20 @@ def miniapp_status(user_id: str) -> JSONResponse:
             "channel_chat_id": MAX_CHANNEL_CHAT_ID,
             "channel_title": channel_title,
             "message": message,
+        }
+    )
+
+
+@app.get("/miniapp/participation")
+def miniapp_participation(user_id: str) -> JSONResponse:
+    participation_date = get_coupon_participation_date(user_id=user_id)
+    already_participated = participation_date is not None and str(user_id) != "24324984"
+    return JSONResponse(
+        {
+            "ok": True,
+            "user_id": user_id,
+            "already_participated": already_participated,
+            "participation_date": participation_date,
         }
     )
 

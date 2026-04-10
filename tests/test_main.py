@@ -58,7 +58,9 @@ class TestMainHelpers(unittest.TestCase):
         text = main.build_coupon_text(date(2026, 3, 20))
         self.assertIn("⏳ Купон действует до 20.03.2026", text)
         self.assertIn("Дарим вам дополнительную скидку 5%.", text)
-        self.assertIn("_⚠ Скидка действует только на товары с белыми ценниками_", text)
+        self.assertIn("Максимальная суммарная скидка - 20%", text)
+        self.assertIn("Купон доступен к получению один раз", text)
+        self.assertIn("_⚠ Скидка действует только на товары с белыми ценниками.", text)
 
     def test_extract_attachment_token_recursive(self) -> None:
         payload = {"result": [{"meta": {"token": "img_token_123"}}]}
@@ -88,7 +90,7 @@ class TestMainHelpers(unittest.TestCase):
 
     def test_render_miniapp_contains_only_subscribe_button(self) -> None:
         html = main.render_miniapp_html()
-        self.assertIn("Подписаться на канал", html)
+        self.assertIn("Подпишись на канал и получи доп.скидку -5%", html)
         self.assertNotIn("Проверить подписку", html)
         self.assertNotIn('id="showCouponBtn"', html)
         self.assertNotIn('placeholder="Введите user_id"', html)
@@ -100,6 +102,8 @@ class TestMainHelpers(unittest.TestCase):
         self.assertIn("window.location.assign(deepLink)", html)
         self.assertNotIn("setTimeout(fallbackToWeb", html)
         self.assertIn("/miniapp/start-subscribe-watch", html)
+        self.assertIn("/miniapp/participation", html)
+        self.assertIn("Участие в акции «Скидка за подписку» возможно только один раз.", html)
 
     def test_build_miniapp_button_attachments_uses_open_app(self) -> None:
         original_web_app = main.MAX_WEB_APP
@@ -210,6 +214,25 @@ class TestMainHelpers(unittest.TestCase):
 
             self.assertEqual(log_mock.call_count, 2)
             self.assertEqual(send_mock.call_count, 2)
+
+    def test_miniapp_participation_blocks_regular_user(self) -> None:
+        with patch("main.get_coupon_participation_date", return_value="10.04.2026"):
+            response = main.miniapp_participation("100")
+            payload = response.body.decode("utf-8")
+            self.assertIn('"already_participated":true', payload)
+            self.assertIn('"participation_date":"10.04.2026"', payload)
+
+    def test_miniapp_participation_allows_special_user(self) -> None:
+        with patch("main.get_coupon_participation_date", return_value="10.04.2026"):
+            response = main.miniapp_participation("24324984")
+            payload = response.body.decode("utf-8")
+            self.assertIn('"already_participated":false', payload)
+
+    def test_process_update_no_auto_reply_when_user_id_missing(self) -> None:
+        payload = {"update_type": "message_created", "message": {"body": {"text": "hello"}}}
+        with patch("main.send_max_message") as send_mock:
+            main.process_update(payload)
+            send_mock.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()
