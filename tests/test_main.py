@@ -1,6 +1,7 @@
 import unittest
 from datetime import date
 from unittest.mock import patch
+from datetime import datetime, timezone
 
 import main
 
@@ -232,6 +233,32 @@ class TestMainHelpers(unittest.TestCase):
         payload = {"update_type": "message_created", "message": {"body": {"text": "hello"}}}
         with patch("main.send_max_message") as send_mock:
             main.process_update(payload)
+            send_mock.assert_not_called()
+
+    def test_should_send_monthly_reminder_only_on_29(self) -> None:
+        self.assertTrue(main.should_send_monthly_reminder(datetime(2026, 4, 29, 10, 0, tzinfo=timezone.utc)))
+        self.assertFalse(main.should_send_monthly_reminder(datetime(2026, 4, 28, 10, 0, tzinfo=timezone.utc)))
+
+    def test_send_monthly_reminder_if_needed_once_per_day(self) -> None:
+        main._last_monthly_reminder_date = None
+        now = datetime(2026, 4, 29, 12, 0, tzinfo=timezone.utc)
+        with patch("main.send_max_message") as send_mock:
+            first = main.send_monthly_reminder_if_needed(now)
+            second = main.send_monthly_reminder_if_needed(now)
+            self.assertTrue(first)
+            self.assertFalse(second)
+            send_mock.assert_called_once_with(
+                text="Обновить штрихкоды в 1с",
+                user_id="24324984",
+                chat_id=None,
+            )
+
+    def test_send_monthly_reminder_if_needed_not_29(self) -> None:
+        main._last_monthly_reminder_date = None
+        now = datetime(2026, 4, 13, 12, 0, tzinfo=timezone.utc)
+        with patch("main.send_max_message") as send_mock:
+            sent = main.send_monthly_reminder_if_needed(now)
+            self.assertFalse(sent)
             send_mock.assert_not_called()
 
 if __name__ == "__main__":

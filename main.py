@@ -151,6 +151,11 @@ _watchers_lock = threading.Lock()
 _coupon_sent_users: set[str] = set()
 _coupon_lock = threading.Lock()
 COUPON_DUPLICATE_ALLOW_USER_IDS = {"24324984"}
+MONTHLY_REMINDER_USER_ID = "24324984"
+MONTHLY_REMINDER_DAY = 29
+MONTHLY_REMINDER_TEXT = "Обновить штрихкоды в 1с"
+_last_monthly_reminder_date: Optional[date] = None
+_monthly_reminder_lock = threading.Lock()
 
 
 def _extract_by_paths(payload: dict[str, Any], paths: list[str]) -> Optional[Any]:
@@ -239,6 +244,41 @@ def _sleep_backoff(attempt: int, base: float = 0.4, cap: float = 8.0) -> None:
     delay = min(cap, base * (2**attempt))
     delay *= 0.5 + random.random()
     time.sleep(delay)
+
+
+def should_send_monthly_reminder(now_utc: datetime) -> bool:
+    return now_utc.day == MONTHLY_REMINDER_DAY
+
+
+def send_monthly_reminder_if_needed(now_utc: Optional[datetime] = None) -> bool:
+    now = now_utc or datetime.now(timezone.utc)
+    if not should_send_monthly_reminder(now):
+        return False
+
+    today = now.date()
+    with _monthly_reminder_lock:
+        global _last_monthly_reminder_date
+        if _last_monthly_reminder_date == today:
+            return False
+
+        try:
+            send_max_message(
+                text=MONTHLY_REMINDER_TEXT,
+                user_id=MONTHLY_REMINDER_USER_ID,
+                chat_id=None,
+            )
+            _last_monthly_reminder_date = today
+            logger.info("Monthly reminder sent to user_id=%s", MONTHLY_REMINDER_USER_ID)
+            return True
+        except Exception as exc:
+            logger.exception("Failed to send monthly reminder: %s", exc)
+            return False
+
+
+def monthly_reminder_worker() -> None:
+    while True:
+        send_monthly_reminder_if_needed()
+        time.sleep(3600)
 
 
 def _is_duplicate_and_mark(key: str) -> bool:
@@ -953,6 +993,8 @@ def auto_register_webhook_on_startup() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     auto_register_webhook_on_startup()
+    threading.Thread(target=monthly_reminder_worker, daemon=True).start()
+    send_monthly_reminder_if_needed()
     yield
 
 
