@@ -123,6 +123,13 @@ class TestMainHelpers(unittest.TestCase):
         self.assertEqual(button["text"], "Получить купон")
         self.assertEqual(button["web_app"], "my_test_bot")
 
+    def test_render_dashboard_html_contains_controls(self) -> None:
+        html = main.render_dashboard_html()
+        self.assertIn("Статистика отправленных купонов", html)
+        self.assertIn("Ручной выбор периода", html)
+        self.assertIn("По дням", html)
+        self.assertIn("/dashboard/data", html)
+
     def test_contains_user_id_recursive(self) -> None:
         payload = {"items": [{"user": {"id": 123}}, {"meta": "x"}]}
         self.assertTrue(main.contains_user_id(payload, "123"))
@@ -234,6 +241,30 @@ class TestMainHelpers(unittest.TestCase):
         with patch("main.send_max_message") as send_mock:
             main.process_update(payload)
             send_mock.assert_not_called()
+
+    def test_aggregate_dates_day_week_month(self) -> None:
+        dates = [date(2026, 4, 1), date(2026, 4, 1), date(2026, 4, 8)]
+        self.assertEqual(main.aggregate_dates(dates, "day")["2026-04-01"], 2)
+        self.assertIn("2026-W14", main.aggregate_dates(dates, "week"))
+        self.assertEqual(main.aggregate_dates(dates, "month")["2026-04"], 3)
+
+    def test_resolve_period_dates_custom(self) -> None:
+        start, end = main.resolve_period_dates("custom", "2026-04-01", "2026-04-10", datetime(2026, 4, 14, tzinfo=timezone.utc))
+        self.assertEqual(start, date(2026, 4, 1))
+        self.assertEqual(end, date(2026, 4, 10))
+
+    def test_process_update_dashboard_command_for_allowed_user(self) -> None:
+        payload = {"update_type": "message_created", "message": {"sender": {"user_id": "24324984"}, "body": {"text": "Дашборд"}}}
+        with patch("main.send_dashboard_entry") as dashboard_mock:
+            main.process_update(payload)
+            dashboard_mock.assert_called_once()
+
+    def test_process_update_dashboard_command_ignored_for_other_user(self) -> None:
+        payload = {"update_type": "message_created", "message": {"sender": {"user_id": "777"}, "body": {"text": "Статистика"}}}
+        with patch("main.send_dashboard_entry") as dashboard_mock, patch("main.send_max_message") as send_mock:
+            main.process_update(payload)
+            dashboard_mock.assert_not_called()
+            send_mock.assert_called_once_with(text="Ваш ID: 777", user_id="777")
 
     def test_should_send_monthly_reminder_only_on_29(self) -> None:
         self.assertTrue(main.should_send_monthly_reminder(datetime(2026, 4, 29, 10, 0, tzinfo=timezone.utc)))

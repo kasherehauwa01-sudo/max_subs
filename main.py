@@ -8,7 +8,7 @@ import threading
 import time
 from calendar import monthrange
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Optional
@@ -156,6 +156,8 @@ MONTHLY_REMINDER_DAY = 29
 MONTHLY_REMINDER_TEXT = "Обновить штрихкоды в 1с"
 _last_monthly_reminder_date: Optional[date] = None
 _monthly_reminder_lock = threading.Lock()
+DASHBOARD_ALLOWED_USER_ID = "24324984"
+DASHBOARD_COMMANDS = {"дашборд", "статистика", "/дашборд", "/статистика"}
 
 
 def _extract_by_paths(payload: dict[str, Any], paths: list[str]) -> Optional[Any]:
@@ -579,6 +581,74 @@ def get_coupon_participation_date(user_id: str) -> Optional[str]:
     return None
 
 
+def get_dashboard_url() -> Optional[str]:
+    base_url = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if base_url:
+        return f"{base_url}/dashboard"
+    if MAX_WEBHOOK_URL:
+        return MAX_WEBHOOK_URL.removesuffix("/webhook") + "/dashboard"
+    if RAILWAY_PUBLIC_DOMAIN:
+        return f"https://{RAILWAY_PUBLIC_DOMAIN}/dashboard"
+    return None
+
+
+def parse_sheet_date(raw_date: str) -> Optional[date]:
+    value = (raw_date or "").strip()
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def aggregate_dates(dates: list[date], granularity: str) -> dict[str, int]:
+    buckets: dict[str, int] = {}
+    for dt in dates:
+        if granularity == "week":
+            iso_year, iso_week, _ = dt.isocalendar()
+            key = f"{iso_year}-W{iso_week:02d}"
+        elif granularity == "month":
+            key = dt.strftime("%Y-%m")
+        else:
+            key = dt.strftime("%Y-%m-%d")
+        buckets[key] = buckets.get(key, 0) + 1
+    return dict(sorted(buckets.items(), key=lambda x: x[0]))
+
+
+def get_coupon_events_dates(start_date: date, end_date: date) -> list[date]:
+    if not GOOGLE_SHEETS_ENABLED or not GOOGLE_SERVICE_ACCOUNT_JSON:
+        raise RuntimeError("Google Sheets integration is disabled")
+
+    import gspread  # type: ignore[import-not-found]
+    from google.oauth2.service_account import Credentials  # type: ignore[import-not-found]
+
+    account_info = normalize_service_account_info(parse_google_service_account(GOOGLE_SERVICE_ACCOUNT_JSON))
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive.readonly",
+    ]
+    credentials = Credentials.from_service_account_info(account_info, scopes=scopes)
+    client = gspread.authorize(credentials)
+    spreadsheet = client.open_by_key(GOOGLE_SHEETS_SPREADSHEET_ID)
+    worksheet = spreadsheet.worksheet(GOOGLE_SHEETS_WORKSHEET) if GOOGLE_SHEETS_WORKSHEET else spreadsheet.sheet1
+
+    records = worksheet.get_all_records()
+    result: list[date] = []
+    for row in records:
+        event_name = str(row.get("Событие") or row.get("event") or "").strip().lower()
+        if event_name and "скидка" not in event_name:
+            continue
+        row_date = parse_sheet_date(str(row.get("Дата") or row.get("date") or ""))
+        if row_date is None:
+            continue
+        if start_date <= row_date <= end_date:
+            result.append(row_date)
+    return result
+
+
 def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
     normalized_user_id = str(user_id or "").strip()
     if normalized_user_id and normalized_user_id not in COUPON_DUPLICATE_ALLOW_USER_IDS:
@@ -704,6 +774,29 @@ def build_miniapp_button_attachments() -> list[dict[str, Any]]:
             },
         }
     ]
+
+
+def build_dashboard_button_attachments() -> list[dict[str, Any]]:
+    dashboard_url = get_dashboard_url()
+    if not dashboard_url:
+        return []
+    return [
+        {
+            "type": "inline_keyboard",
+            "payload": {
+                "buttons": [[{"type": "link", "text": "Открыть дашборд", "url": dashboard_url}]]
+            },
+        }
+    ]
+
+
+def send_dashboard_entry(user_id: Optional[str], chat_id: Optional[str]) -> None:
+    send_max_message(
+        text="Откройте дашборд статистики купонов по кнопке ниже.",
+        user_id=user_id,
+        chat_id=chat_id,
+        attachments=build_dashboard_button_attachments(),
+    )
 
 
 def send_miniapp_entry(user_id: Optional[str], chat_id: Optional[str]) -> None:
@@ -1036,6 +1129,9 @@ def process_update(payload: dict[str, Any]) -> None:
     message_text = normalize_incoming_text(extract_message_text(payload) or "")
 
     try:
+        if user_id == DASHBOARD_ALLOWED_USER_ID and message_text in DASHBOARD_COMMANDS:
+            send_dashboard_entry(user_id=user_id, chat_id=chat_id)
+            return
         if message_text in {"test", "тест", "/test", "/hello", "/start", "+"}:
             send_miniapp_entry(user_id=user_id, chat_id=chat_id)
             return
@@ -1297,9 +1393,205 @@ def render_miniapp_html() -> str:
 """
 
 
+def render_dashboard_html() -> str:
+    return """
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Дашборд купонов</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      body { font-family: Inter, system-ui, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
+      .wrap { max-width: 980px; margin: 0 auto; padding: 18px; }
+      .card { background: #fff; border-radius: 14px; padding: 16px; box-shadow: 0 6px 20px rgba(2, 6, 23, 0.08); }
+      .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 12px; }
+      label { display: block; font-size: 13px; color: #334155; margin-bottom: 4px; }
+      select, input, button { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #cbd5e1; font-size: 14px; box-sizing: border-box; }
+      button { background: #2563eb; color: white; border: none; cursor: pointer; }
+      .meta { margin-top: 8px; font-size: 13px; color: #475569; }
+      .err { color: #b91c1c; margin-top: 8px; font-size: 14px; }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h2>📊 Статистика отправленных купонов</h2>
+        <div class="controls">
+          <div>
+            <label for="period">Период</label>
+            <select id="period">
+              <option value="yesterday">Вчера</option>
+              <option value="today" selected>Сегодня</option>
+              <option value="week">Неделя</option>
+              <option value="month">Месяц</option>
+              <option value="quarter">Квартал</option>
+              <option value="custom">Ручной выбор периода</option>
+            </select>
+          </div>
+          <div>
+            <label for="granularity">Детализация</label>
+            <select id="granularity">
+              <option value="day" selected>По дням</option>
+              <option value="week">По неделям</option>
+              <option value="month">По месяцам</option>
+            </select>
+          </div>
+          <div id="fromWrap" class="hidden">
+            <label for="dateFrom">Дата с</label>
+            <input id="dateFrom" type="date" />
+          </div>
+          <div id="toWrap" class="hidden">
+            <label for="dateTo">Дата по</label>
+            <input id="dateTo" type="date" />
+          </div>
+          <div>
+            <label>&nbsp;</label>
+            <button id="applyBtn">Показать</button>
+          </div>
+        </div>
+        <canvas id="statsChart" height="120"></canvas>
+        <div id="meta" class="meta"></div>
+        <div id="error" class="err"></div>
+      </div>
+    </div>
+    <script>
+      const periodEl = document.getElementById('period');
+      const granularityEl = document.getElementById('granularity');
+      const fromWrap = document.getElementById('fromWrap');
+      const toWrap = document.getElementById('toWrap');
+      const dateFromEl = document.getElementById('dateFrom');
+      const dateToEl = document.getElementById('dateTo');
+      const applyBtn = document.getElementById('applyBtn');
+      const metaEl = document.getElementById('meta');
+      const errorEl = document.getElementById('error');
+      const ctx = document.getElementById('statsChart');
+      let chart;
+
+      const updateCustomVisibility = () => {
+        const isCustom = periodEl.value === 'custom';
+        fromWrap.classList.toggle('hidden', !isCustom);
+        toWrap.classList.toggle('hidden', !isCustom);
+      };
+
+      const renderChart = (labels, values) => {
+        if (chart) chart.destroy();
+        chart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [{ label: 'Отправленные купоны', data: values, backgroundColor: '#2563eb' }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+          }
+        });
+      };
+
+      const loadStats = async () => {
+        errorEl.textContent = '';
+        const params = new URLSearchParams({
+          period: periodEl.value,
+          granularity: granularityEl.value
+        });
+        if (periodEl.value === 'custom') {
+          if (!dateFromEl.value || !dateToEl.value) {
+            errorEl.textContent = 'Для ручного периода заполните обе даты.';
+            return;
+          }
+          params.set('date_from', dateFromEl.value);
+          params.set('date_to', dateToEl.value);
+        }
+        const res = await fetch(`/dashboard/data?${params.toString()}`);
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          errorEl.textContent = data.detail || 'Не удалось загрузить статистику.';
+          return;
+        }
+        renderChart(data.labels, data.values);
+        metaEl.textContent = `Период: ${data.period_start} — ${data.period_end}. Всего купонов: ${data.total}.`;
+      };
+
+      periodEl.addEventListener('change', updateCustomVisibility);
+      applyBtn.addEventListener('click', loadStats);
+      updateCustomVisibility();
+      loadStats();
+    </script>
+  </body>
+</html>
+"""
+
+
 @app.get("/", response_class=HTMLResponse)
 def root() -> str:
     return render_miniapp_html()
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard_page() -> str:
+    return render_dashboard_html()
+
+
+def resolve_period_dates(period: str, date_from: Optional[str], date_to: Optional[str], now_utc: datetime) -> tuple[date, date]:
+    today = now_utc.date()
+    if period == "yesterday":
+        day = today - timedelta(days=1)
+        return day, day
+    if period == "today":
+        return today, today
+    if period == "week":
+        return today - timedelta(days=6), today
+    if period == "month":
+        return today - timedelta(days=29), today
+    if period == "quarter":
+        return today - timedelta(days=89), today
+    if period == "custom":
+        if not date_from or not date_to:
+            raise HTTPException(status_code=400, detail="Для custom периода укажите date_from и date_to")
+        start = datetime.strptime(date_from, "%Y-%m-%d").date()
+        end = datetime.strptime(date_to, "%Y-%m-%d").date()
+        if start > end:
+            raise HTTPException(status_code=400, detail="date_from не может быть позже date_to")
+        return start, end
+    raise HTTPException(status_code=400, detail="Неверный период")
+
+
+@app.get("/dashboard/data")
+def dashboard_data(
+    period: str = "today",
+    granularity: str = "day",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> JSONResponse:
+    if granularity not in {"day", "week", "month"}:
+        raise HTTPException(status_code=400, detail="granularity должен быть day, week или month")
+
+    start_date, end_date = resolve_period_dates(period, date_from, date_to, datetime.now(timezone.utc))
+    try:
+        event_dates = get_coupon_events_dates(start_date=start_date, end_date=end_date)
+        buckets = aggregate_dates(event_dates, granularity)
+    except Exception as exc:
+        logger.exception("Dashboard data error: %s", exc)
+        raise HTTPException(status_code=500, detail="Не удалось загрузить данные дашборда") from exc
+
+    labels = list(buckets.keys())
+    values = [buckets[k] for k in labels]
+    return JSONResponse(
+        {
+            "ok": True,
+            "period": period,
+            "granularity": granularity,
+            "period_start": start_date.isoformat(),
+            "period_end": end_date.isoformat(),
+            "labels": labels,
+            "values": values,
+            "total": sum(values),
+        }
+    )
 
 
 @app.get("/webhook")
