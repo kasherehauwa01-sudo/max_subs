@@ -129,6 +129,7 @@ class TestMainHelpers(unittest.TestCase):
         self.assertIn("Ручной выбор периода", html)
         self.assertIn("По дням", html)
         self.assertIn("/dashboard/data", html)
+        self.assertIn("user_id", html)
 
     def test_contains_user_id_recursive(self) -> None:
         payload = {"items": [{"user": {"id": 123}}, {"meta": "x"}]}
@@ -254,7 +255,13 @@ class TestMainHelpers(unittest.TestCase):
         self.assertEqual(end, date(2026, 4, 10))
 
     def test_process_update_dashboard_command_for_allowed_user(self) -> None:
-        payload = {"update_type": "message_created", "message": {"sender": {"user_id": "24324984"}, "body": {"text": "Дашборд"}}}
+        payload = {"update_type": "message_created", "message": {"sender": {"user_id": "242649311"}, "body": {"text": "Дашборд"}}}
+        with patch("main.send_dashboard_entry") as dashboard_mock:
+            main.process_update(payload)
+            dashboard_mock.assert_called_once()
+
+    def test_process_update_dashboard_command_for_second_allowed_user(self) -> None:
+        payload = {"update_type": "message_created", "message": {"sender": {"user_id": "24324984"}, "body": {"text": "Статистика"}}}
         with patch("main.send_dashboard_entry") as dashboard_mock:
             main.process_update(payload)
             dashboard_mock.assert_called_once()
@@ -264,7 +271,22 @@ class TestMainHelpers(unittest.TestCase):
         with patch("main.send_dashboard_entry") as dashboard_mock, patch("main.send_max_message") as send_mock:
             main.process_update(payload)
             dashboard_mock.assert_not_called()
-            send_mock.assert_called_once_with(text="Ваш ID: 777", user_id="777")
+            send_mock.assert_not_called()
+
+    def test_process_update_id_command_disabled(self) -> None:
+        payload = {"update_type": "message_created", "message": {"sender": {"user_id": "777"}, "body": {"text": "id"}}}
+        with patch("main.send_max_message") as send_mock:
+            main.process_update(payload)
+            send_mock.assert_called_once_with(
+                text="Функция отправки user_id отключена.",
+                user_id="777",
+                chat_id=None,
+            )
+
+    def test_is_dashboard_user_allowed(self) -> None:
+        self.assertTrue(main.is_dashboard_user_allowed("242649311"))
+        self.assertTrue(main.is_dashboard_user_allowed("24324984"))
+        self.assertFalse(main.is_dashboard_user_allowed("777"))
 
     def test_should_send_monthly_reminder_only_on_29(self) -> None:
         self.assertTrue(main.should_send_monthly_reminder(datetime(2026, 4, 29, 10, 0, tzinfo=timezone.utc)))

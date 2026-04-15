@@ -156,7 +156,7 @@ MONTHLY_REMINDER_DAY = 29
 MONTHLY_REMINDER_TEXT = "Обновить штрихкоды в 1с"
 _last_monthly_reminder_date: Optional[date] = None
 _monthly_reminder_lock = threading.Lock()
-DASHBOARD_ALLOWED_USER_ID = "24324984"
+DASHBOARD_ALLOWED_USER_IDS = {"242649311", "24324984"}
 DASHBOARD_COMMANDS = {"дашборд", "статистика", "/дашборд", "/статистика"}
 
 
@@ -649,6 +649,11 @@ def get_coupon_events_dates(start_date: date, end_date: date) -> list[date]:
     return result
 
 
+def is_dashboard_user_allowed(user_id: Optional[str]) -> bool:
+    uid = str(user_id or "").strip()
+    return uid in DASHBOARD_ALLOWED_USER_IDS
+
+
 def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
     normalized_user_id = str(user_id or "").strip()
     if normalized_user_id and normalized_user_id not in COUPON_DUPLICATE_ALLOW_USER_IDS:
@@ -776,10 +781,14 @@ def build_miniapp_button_attachments() -> list[dict[str, Any]]:
     ]
 
 
-def build_dashboard_button_attachments() -> list[dict[str, Any]]:
+def build_dashboard_button_attachments(user_id: Optional[str]) -> list[dict[str, Any]]:
     dashboard_url = get_dashboard_url()
     if not dashboard_url:
         return []
+    uid = str(user_id or "").strip()
+    if uid:
+        separator = "&" if "?" in dashboard_url else "?"
+        dashboard_url = f"{dashboard_url}{separator}user_id={uid}"
     return [
         {
             "type": "inline_keyboard",
@@ -795,7 +804,7 @@ def send_dashboard_entry(user_id: Optional[str], chat_id: Optional[str]) -> None
         text="Откройте дашборд статистики купонов по кнопке ниже.",
         user_id=user_id,
         chat_id=chat_id,
-        attachments=build_dashboard_button_attachments(),
+        attachments=build_dashboard_button_attachments(user_id=user_id),
     )
 
 
@@ -1129,7 +1138,7 @@ def process_update(payload: dict[str, Any]) -> None:
     message_text = normalize_incoming_text(extract_message_text(payload) or "")
 
     try:
-        if user_id == DASHBOARD_ALLOWED_USER_ID and message_text in DASHBOARD_COMMANDS:
+        if is_dashboard_user_allowed(user_id) and message_text in DASHBOARD_COMMANDS:
             send_dashboard_entry(user_id=user_id, chat_id=chat_id)
             return
         if message_text in {"test", "тест", "/test", "/hello", "/start", "+"}:
@@ -1143,20 +1152,16 @@ def process_update(payload: dict[str, Any]) -> None:
             )
             return
         if message_text in {"id", "айди", "/id"}:
-            if user_id:
-                send_max_message(text=f"Ваш ID: {user_id}", user_id=user_id, chat_id=chat_id)
-            elif chat_id:
-                send_max_message(
-                    text="Не удалось извлечь user_id. Ваш chat_id: " + chat_id,
-                    chat_id=chat_id,
-                )
+            send_max_message(
+                text="Функция отправки user_id отключена.",
+                user_id=user_id,
+                chat_id=chat_id,
+            )
             return
 
         if not user_id:
             logger.warning("Не удалось извлечь user_id из события")
             return
-
-        send_max_message(text=f"Ваш ID: {user_id}", user_id=user_id)
     except Exception as exc:
         logger.exception("Ошибка обработки события: %s", exc)
 
@@ -1468,6 +1473,7 @@ def render_dashboard_html() -> str:
       const metaEl = document.getElementById('meta');
       const errorEl = document.getElementById('error');
       const ctx = document.getElementById('statsChart');
+      const dashboardUserId = new URLSearchParams(window.location.search).get('user_id') || '';
       let chart;
 
       const updateCustomVisibility = () => {
@@ -1494,7 +1500,12 @@ def render_dashboard_html() -> str:
 
       const loadStats = async () => {
         errorEl.textContent = '';
+        if (!dashboardUserId) {
+          errorEl.textContent = 'Отсутствует user_id для доступа к дашборду.';
+          return;
+        }
         const params = new URLSearchParams({
+          user_id: dashboardUserId,
           period: periodEl.value,
           granularity: granularityEl.value
         });
@@ -1532,7 +1543,9 @@ def root() -> str:
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
-def dashboard_page() -> str:
+def dashboard_page(user_id: str) -> str:
+    if not is_dashboard_user_allowed(user_id):
+        raise HTTPException(status_code=403, detail="Доступ к дашборду запрещен")
     return render_dashboard_html()
 
 
@@ -1562,11 +1575,14 @@ def resolve_period_dates(period: str, date_from: Optional[str], date_to: Optiona
 
 @app.get("/dashboard/data")
 def dashboard_data(
+    user_id: str,
     period: str = "today",
     granularity: str = "day",
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> JSONResponse:
+    if not is_dashboard_user_allowed(user_id):
+        raise HTTPException(status_code=403, detail="Доступ к дашборду запрещен")
     if granularity not in {"day", "week", "month"}:
         raise HTTPException(status_code=400, detail="granularity должен быть day, week или month")
 
