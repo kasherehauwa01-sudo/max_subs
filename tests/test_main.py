@@ -29,6 +29,10 @@ class TestMainHelpers(unittest.TestCase):
         payload = {"message": {"body": {"text": "Тест"}}}
         self.assertEqual(main.extract_message_text(payload), "Тест")
 
+    def test_has_qr_utm_source_detects_payload(self) -> None:
+        payload = {"message": {"body": {"text": "/start utm_source=qr_podpiska"}}}
+        self.assertTrue(main.has_qr_utm_source(payload))
+
     def test_normalize_incoming_text_with_mention(self) -> None:
         self.assertEqual(main.normalize_incoming_text("/id@my_bot"), "/id")
 
@@ -259,6 +263,27 @@ class TestMainHelpers(unittest.TestCase):
         with patch("main.send_dashboard_entry") as dashboard_mock:
             main.process_update(payload)
             dashboard_mock.assert_called_once()
+
+    def test_process_update_start_with_qr_utm_sends_qr_button(self) -> None:
+        main._qr_podpiska_users.clear()
+        payload = {
+            "update_type": "message_created",
+            "message": {"sender": {"user_id": "100"}, "body": {"text": "/start utm_source=qr_podpiska"}},
+        }
+        with patch("main.send_qr_subscription_entry") as qr_mock:
+            main.process_update(payload)
+            qr_mock.assert_called_once_with(user_id="100", chat_id=None)
+
+    def test_process_update_qr_callback_starts_watcher(self) -> None:
+        payload = {
+            "update_type": "message_callback",
+            "message": {"sender": {"user_id": "100"}},
+            "callback": {"payload": "qr_subscribe_coupon"},
+        }
+        with patch("main.start_subscription_watch", return_value=True) as watch_mock, patch("main.send_max_message") as send_mock:
+            main.process_update(payload)
+            watch_mock.assert_called_once_with("100")
+            send_mock.assert_called_once()
 
     def test_process_update_dashboard_command_for_second_allowed_user(self) -> None:
         payload = {"update_type": "message_created", "message": {"sender": {"user_id": "24324984"}, "body": {"text": "Статистика"}}}

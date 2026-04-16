@@ -158,6 +158,10 @@ _last_monthly_reminder_date: Optional[date] = None
 _monthly_reminder_lock = threading.Lock()
 DASHBOARD_ALLOWED_USER_IDS = {"242649311", "24324984"}
 DASHBOARD_COMMANDS = {"дашборд", "статистика", "/дашборд", "/статистика"}
+QR_UTM_SOURCE_VALUE = "qr_podpiska"
+QR_SUBSCRIBE_CALLBACK_DATA = "qr_subscribe_coupon"
+_qr_podpiska_users: set[str] = set()
+_qr_users_lock = threading.Lock()
 
 
 def _extract_by_paths(payload: dict[str, Any], paths: list[str]) -> Optional[Any]:
@@ -213,6 +217,56 @@ def extract_message_text(payload: dict[str, Any]) -> Optional[str]:
         ],
     )
     return str(text_value) if text_value is not None else None
+
+
+def extract_callback_data(payload: dict[str, Any]) -> Optional[str]:
+    callback_data = _extract_by_paths(
+        payload,
+        [
+            "callback.payload",
+            "callback.data",
+            "callback.value",
+            "payload",
+            "data",
+        ],
+    )
+    return str(callback_data) if callback_data is not None else None
+
+
+def has_qr_utm_source(payload: dict[str, Any]) -> bool:
+    """
+    Проверяет наличие utm_source=qr_podpiska в start/deep link payload.
+    Поддерживает разные форматы входящих событий.
+    """
+    candidate_paths = [
+        "message.body.text",
+        "message.body.payload",
+        "message.payload",
+        "start.payload",
+        "payload",
+    ]
+    needle = f"utm_source={QR_UTM_SOURCE_VALUE}"
+    for path in candidate_paths:
+        value = _extract_by_paths(payload, [path])
+        if value is not None and needle in str(value):
+            return True
+    return False
+
+
+def mark_user_came_from_qr(user_id: Optional[str]) -> None:
+    uid = str(user_id or "").strip()
+    if not uid:
+        return
+    with _qr_users_lock:
+        _qr_podpiska_users.add(uid)
+
+
+def came_from_qr(user_id: Optional[str]) -> bool:
+    uid = str(user_id or "").strip()
+    if not uid:
+        return False
+    with _qr_users_lock:
+        return uid in _qr_podpiska_users
 
 
 def normalize_incoming_text(raw_text: str) -> str:
@@ -654,6 +708,14 @@ def is_dashboard_user_allowed(user_id: Optional[str]) -> bool:
     return uid in DASHBOARD_ALLOWED_USER_IDS
 
 
+def has_coupon_already_been_sent(user_id: Optional[str]) -> bool:
+    uid = str(user_id or "").strip()
+    if not uid:
+        return False
+    with _coupon_lock:
+        return uid in _coupon_sent_users
+
+
 def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
     normalized_user_id = str(user_id or "").strip()
     if normalized_user_id and normalized_user_id not in COUPON_DUPLICATE_ALLOW_USER_IDS:
@@ -799,12 +861,46 @@ def build_dashboard_button_attachments(user_id: Optional[str]) -> list[dict[str,
     ]
 
 
+def build_qr_subscribe_button_attachments() -> list[dict[str, Any]]:
+    """
+    Кнопка для сценария qr_podpiska.
+    Нажатие генерирует callback, после чего бот:
+    1) отправляет ссылку на канал;
+    2) запускает watcher на авто-отправку купона через ~6 секунд.
+    """
+    return [
+        {
+            "type": "inline_keyboard",
+            "payload": {
+                "buttons": [
+                    [
+                        {
+                            "type": "callback",
+                            "text": "Подписаться на канал и получить доп. скидку -5%",
+                            "payload": QR_SUBSCRIBE_CALLBACK_DATA,
+                        }
+                    ]
+                ]
+            },
+        }
+    ]
+
+
 def send_dashboard_entry(user_id: Optional[str], chat_id: Optional[str]) -> None:
     send_max_message(
         text="Откройте дашборд статистики купонов по кнопке ниже.",
         user_id=user_id,
         chat_id=chat_id,
         attachments=build_dashboard_button_attachments(user_id=user_id),
+    )
+
+
+def send_qr_subscription_entry(user_id: Optional[str], chat_id: Optional[str]) -> None:
+    send_max_message(
+        text="Нажмите кнопку ниже, чтобы подписаться на канал и получить купон.",
+        user_id=user_id,
+        chat_id=chat_id,
+        attachments=build_qr_subscribe_button_attachments(),
     )
 
 
@@ -1124,7 +1220,7 @@ def subscribe_post() -> JSONResponse:
 
 def process_update(payload: dict[str, Any]) -> None:
     update_type = str(payload.get("update_type") or "")
-    if update_type and update_type not in {"message_created", "bot_started"}:
+    if update_type and update_type not in {"message_created", "bot_started", "message_callback"}:
         logger.info("Skip unsupported update_type=%s", update_type)
         return
 
@@ -1136,10 +1232,54 @@ def process_update(payload: dict[str, Any]) -> None:
     user_id = extract_user_id(payload)
     chat_id = extract_chat_id(payload)
     message_text = normalize_incoming_text(extract_message_text(payload) or "")
+    callback_data = normalize_incoming_text(extract_callback_data(payload) or "")
+
+    # Отслеживаем источник запуска бота через UTM, чтобы применить специальный QR-сценарий.
+    if has_qr_utm_source(payload):
+        mark_user_came_from_qr(user_id)
 
     try:
+        if callback_data == QR_SUBSCRIBE_CALLBACK_DATA:
+            if not user_id:
+                logger.warning("QR callback without user_id")
+                return
+            if has_coupon_already_been_sent(user_id):
+                send_max_message(
+                    text="Вы уже получили купон 🎁 Повторная выдача недоступна.",
+                    user_id=user_id,
+                    chat_id=chat_id,
+                )
+                return
+            started = start_subscription_watch(str(user_id))
+            if started:
+                send_max_message(
+                    text=(
+                        f"Подпишитесь на канал: {MAX_CHANNEL_DEEPLINK}\n"
+                        "После перехода купон будет отправлен автоматически примерно через 6 секунд."
+                    ),
+                    user_id=user_id,
+                    chat_id=chat_id,
+                )
+            else:
+                send_max_message(
+                    text="Проверка уже запущена. Купон придёт автоматически через несколько секунд.",
+                    user_id=user_id,
+                    chat_id=chat_id,
+                )
+            return
+
         if is_dashboard_user_allowed(user_id) and message_text in DASHBOARD_COMMANDS:
             send_dashboard_entry(user_id=user_id, chat_id=chat_id)
+            return
+        if message_text in {"/start", "start"} and came_from_qr(user_id):
+            if has_coupon_already_been_sent(user_id):
+                send_max_message(
+                    text="Вы уже получили купон 🎁 Повторная выдача недоступна.",
+                    user_id=user_id,
+                    chat_id=chat_id,
+                )
+                return
+            send_qr_subscription_entry(user_id=user_id, chat_id=chat_id)
             return
         if message_text in {"test", "тест", "/test", "/hello", "/start", "+"}:
             send_miniapp_entry(user_id=user_id, chat_id=chat_id)
