@@ -146,11 +146,6 @@ app = FastAPI(title="MAX ID Bot", version="1.2.0")
 # Простой in-memory dedup для повторной доставки webhook (at-least-once).
 _processed_updates: dict[str, float] = {}
 _dedup_lock = threading.Lock()
-_subscription_watchers: set[str] = set()
-_watchers_lock = threading.Lock()
-_coupon_sent_users: set[str] = set()
-_coupon_lock = threading.Lock()
-COUPON_DUPLICATE_ALLOW_USER_IDS = {"24324984"}
 MONTHLY_REMINDER_USER_ID = "24324984"
 MONTHLY_REMINDER_DAY = 29
 MONTHLY_REMINDER_TEXT = "Обновить штрихкоды в 1с"
@@ -708,28 +703,7 @@ def is_dashboard_user_allowed(user_id: Optional[str]) -> bool:
     return uid in DASHBOARD_ALLOWED_USER_IDS
 
 
-def has_coupon_already_been_sent(user_id: Optional[str]) -> bool:
-    uid = str(user_id or "").strip()
-    if not uid:
-        return False
-    with _coupon_lock:
-        return uid in _coupon_sent_users
-
-
 def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
-    normalized_user_id = str(user_id or "").strip()
-    if normalized_user_id and normalized_user_id not in COUPON_DUPLICATE_ALLOW_USER_IDS:
-        with _coupon_lock:
-            if normalized_user_id in _coupon_sent_users:
-                logger.info("Skip duplicate coupon send for user_id=%s", normalized_user_id)
-                send_max_message(
-                    text="Вы уже получили купон 🎁 Повторная отправка для вашего ID отключена.",
-                    user_id=user_id,
-                    chat_id=chat_id,
-                )
-                return
-            _coupon_sent_users.add(normalized_user_id)
-
     log_coupon_event_to_google_sheet(user_id=user_id, event_name="Скидка за подписку")
     barcode_value, expiry_date = get_coupon_barcode_and_expiry()
     coupon_text = build_coupon_text(expiry_date)
@@ -765,16 +739,9 @@ def _send_coupon_after_subscribe_click(user_id: str) -> None:
         logger.info("Subscribe click watcher: coupon sent for user_id=%s after 6 seconds", user_id)
     except Exception as exc:
         logger.exception("Subscribe click watcher failed for user_id=%s: %s", user_id, exc)
-    finally:
-        with _watchers_lock:
-            _subscription_watchers.discard(user_id)
 
 
 def start_subscription_watch(user_id: str) -> bool:
-    with _watchers_lock:
-        if user_id in _subscription_watchers:
-            return False
-        _subscription_watchers.add(user_id)
     worker = threading.Thread(target=_send_coupon_after_subscribe_click, args=(user_id,), daemon=True)
     worker.start()
     return True
@@ -1243,13 +1210,6 @@ def process_update(payload: dict[str, Any]) -> None:
             if not user_id:
                 logger.warning("QR callback without user_id")
                 return
-            if has_coupon_already_been_sent(user_id):
-                send_max_message(
-                    text="Вы уже получили купон 🎁 Повторная выдача недоступна.",
-                    user_id=user_id,
-                    chat_id=chat_id,
-                )
-                return
             started = start_subscription_watch(str(user_id))
             if started:
                 send_max_message(
@@ -1272,13 +1232,6 @@ def process_update(payload: dict[str, Any]) -> None:
             send_dashboard_entry(user_id=user_id, chat_id=chat_id)
             return
         if message_text in {"/start", "start"} and came_from_qr(user_id):
-            if has_coupon_already_been_sent(user_id):
-                send_max_message(
-                    text="Вы уже получили купон 🎁 Повторная выдача недоступна.",
-                    user_id=user_id,
-                    chat_id=chat_id,
-                )
-                return
             send_qr_subscription_entry(user_id=user_id, chat_id=chat_id)
             return
         if message_text in {"test", "тест", "/test", "/hello", "/start", "+"}:
