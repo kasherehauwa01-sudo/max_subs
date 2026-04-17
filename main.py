@@ -105,6 +105,16 @@ def _find_token_recursive(value: Any) -> Optional[str]:
     return None
 
 
+def _contains_substring_recursive(value: Any, needle: str) -> bool:
+    if isinstance(value, dict):
+        return any(_contains_substring_recursive(v, needle) for v in value.values())
+    if isinstance(value, list):
+        return any(_contains_substring_recursive(v, needle) for v in value)
+    if isinstance(value, str):
+        return needle in value
+    return False
+
+
 def parse_google_service_account(raw_value: str) -> dict[str, Any]:
     """
     Разбирает GOOGLE_SERVICE_ACCOUNT_JSON из env в одном из форматов:
@@ -179,6 +189,7 @@ def extract_user_id(payload: dict[str, Any]) -> Optional[str]:
         "message.sender.id",
         "sender.user_id",
         "sender.id",
+        "user_id",
         "user.user_id",
         "user.id",
         "profile.user_id",
@@ -245,7 +256,8 @@ def has_qr_utm_source(payload: dict[str, Any]) -> bool:
         value = _extract_by_paths(payload, [path])
         if value is not None and needle in str(value):
             return True
-    return False
+    # Фолбэк для нестабильных схем webhook: ищем UTM по всему payload.
+    return _contains_substring_recursive(payload, needle)
 
 
 def mark_user_came_from_qr(user_id: Optional[str]) -> None:
@@ -275,6 +287,11 @@ def normalize_incoming_text(raw_text: str) -> str:
     if text.startswith("/") and "@" in text:
         text = text.split("@", 1)[0]
     return text
+
+
+def is_start_command(normalized_text: str) -> bool:
+    text = (normalized_text or "").strip()
+    return text == "start" or text.startswith("/start")
 
 
 def extract_dedup_key(payload: dict[str, Any]) -> Optional[str]:
@@ -1231,7 +1248,7 @@ def process_update(payload: dict[str, Any]) -> None:
         if is_dashboard_user_allowed(user_id) and message_text in DASHBOARD_COMMANDS:
             send_dashboard_entry(user_id=user_id, chat_id=chat_id)
             return
-        if message_text in {"/start", "start"} and came_from_qr(user_id):
+        if (is_start_command(message_text) or update_type == "bot_started") and came_from_qr(user_id):
             send_qr_subscription_entry(user_id=user_id, chat_id=chat_id)
             return
         if message_text in {"test", "тест", "/test", "/hello", "/start", "+"}:

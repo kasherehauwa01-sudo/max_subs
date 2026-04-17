@@ -33,6 +33,10 @@ class TestMainHelpers(unittest.TestCase):
         payload = {"message": {"body": {"text": "/start utm_source=qr_podpiska"}}}
         self.assertTrue(main.has_qr_utm_source(payload))
 
+    def test_has_qr_utm_source_detects_unknown_nested_path(self) -> None:
+        payload = {"meta": {"deep_link": "https://x/?utm_source=qr_podpiska"}}
+        self.assertTrue(main.has_qr_utm_source(payload))
+
     def test_normalize_incoming_text_with_mention(self) -> None:
         self.assertEqual(main.normalize_incoming_text("/id@my_bot"), "/id")
 
@@ -249,6 +253,17 @@ class TestMainHelpers(unittest.TestCase):
         payload = {
             "update_type": "message_created",
             "message": {"sender": {"user_id": "100"}, "body": {"text": "/start utm_source=qr_podpiska"}},
+        }
+        with patch("main.send_qr_subscription_entry") as qr_mock:
+            main.process_update(payload)
+            qr_mock.assert_called_once_with(user_id="100", chat_id=None)
+
+    def test_process_update_bot_started_with_qr_utm_sends_qr_button(self) -> None:
+        main._qr_podpiska_users.clear()
+        payload = {
+            "update_type": "bot_started",
+            "user_id": "100",
+            "meta": {"deeplink": "utm_source=qr_podpiska"},
         }
         with patch("main.send_qr_subscription_entry") as qr_mock:
             main.process_update(payload)
