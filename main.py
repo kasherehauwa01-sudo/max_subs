@@ -1791,6 +1791,24 @@ async def webhook(
         raise HTTPException(status_code=400, detail="Некорректный JSON") from exc
 
     logger.info("Incoming MAX event: %s", json.dumps(payload, ensure_ascii=False))
+    print("INCOMING:", payload)
+
+    # Быстрый ответ по "рабочему варианту":
+    # если webhook пришёл в формате message.from.id, сразу отправляем подтверждение.
+    try:
+        direct_user_id = str(payload.get("message", {}).get("from", {}).get("id") or "").strip()
+        if direct_user_id and MAX_BOT_TOKEN:
+            requests.post(
+                f"{MAX_API_BASE_URL}/messages",
+                headers={"Authorization": MAX_BOT_TOKEN},
+                json={
+                    "user_id": direct_user_id,
+                    "text": "Я получил сообщение!",
+                },
+                timeout=MAX_TIMEOUT_SECONDS,
+            )
+    except Exception as exc:
+        print("ERROR:", exc)
 
     background_tasks.add_task(process_update, payload)
     return JSONResponse({"ok": True, "accepted": True})

@@ -334,5 +334,27 @@ class TestMainHelpers(unittest.TestCase):
             self.assertFalse(sent)
             send_mock.assert_not_called()
 
+    def test_webhook_sends_direct_ack_for_message_from_id(self) -> None:
+        import asyncio
+
+        class _Req:
+            async def json(self):
+                return {"message": {"from": {"id": 321}}, "update_type": "message_created"}
+
+        class _Bg:
+            def add_task(self, *_args, **_kwargs):
+                return None
+
+        with patch("main.requests.post") as post_mock:
+            result = asyncio.run(
+                main.webhook(
+                    request=_Req(),
+                    background_tasks=_Bg(),
+                    x_max_bot_api_secret=None,
+                )
+            )
+            self.assertEqual(result.status_code, 200)
+            post_mock.assert_called()
+
 if __name__ == "__main__":
     unittest.main()
