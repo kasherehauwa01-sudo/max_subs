@@ -1122,10 +1122,14 @@ def get_effective_webhook_url() -> Optional[str]:
     """
     Возвращает webhook URL в приоритете:
     1) MAX_WEBHOOK_URL
-    2) RAILWAY_PUBLIC_DOMAIN -> https://<domain>/webhook
+    2) PUBLIC_BASE_URL -> <base>/webhook
+    3) RAILWAY_PUBLIC_DOMAIN -> https://<domain>/webhook
     """
     if MAX_WEBHOOK_URL:
         return MAX_WEBHOOK_URL
+    public_base_url = get_public_base_url()
+    if public_base_url:
+        return public_base_url.rstrip("/") + "/webhook"
     if RAILWAY_PUBLIC_DOMAIN:
         return f"https://{RAILWAY_PUBLIC_DOMAIN}/webhook"
     return None
@@ -1137,7 +1141,11 @@ def get_effective_update_types() -> list[str]:
 
 def auto_register_webhook_on_startup() -> None:
     effective_webhook_url = get_effective_webhook_url()
-    webhook_url_source = "MAX_WEBHOOK_URL" if MAX_WEBHOOK_URL else ("RAILWAY_PUBLIC_DOMAIN" if RAILWAY_PUBLIC_DOMAIN else "not_set")
+    webhook_url_source = (
+        "MAX_WEBHOOK_URL"
+        if MAX_WEBHOOK_URL
+        else ("PUBLIC_BASE_URL" if get_public_base_url() else ("RAILWAY_PUBLIC_DOMAIN" if RAILWAY_PUBLIC_DOMAIN else "not_set"))
+    )
     logger.info(
         "Startup config: token_set=%s webhook_url_source=%s configured_webhook_url=%s effective_webhook_url=%s auto_register=%s update_types=%s secret_set=%s self_check=%s",
         bool(MAX_BOT_TOKEN),
@@ -1756,6 +1764,7 @@ def health_config() -> JSONResponse:
                 "max_api_base_url": MAX_API_BASE_URL,
                 "token_set": bool(MAX_BOT_TOKEN),
                 "webhook_url": MAX_WEBHOOK_URL,
+                "public_base_url": get_public_base_url(),
                 "railway_public_domain": RAILWAY_PUBLIC_DOMAIN,
                 "effective_webhook_url": effective_webhook_url,
                 "webhook_secret_set": bool(MAX_WEBHOOK_SECRET),
@@ -1885,6 +1894,7 @@ def run() -> None:
     Это нужно для платформ, где stderr автоматически помечается как error.
     """
     log_level = os.getenv("LOG_LEVEL", "INFO").lower()
+    host = os.getenv("APP_HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
     log_config = {
         "version": 1,
@@ -1907,7 +1917,7 @@ def run() -> None:
             "uvicorn.access": {"handlers": ["default"], "level": log_level.upper(), "propagate": False},
         },
     }
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level=log_level, log_config=log_config)
+    uvicorn.run(app, host=host, port=port, log_level=log_level, log_config=log_config)
 
 
 if __name__ == "__main__":

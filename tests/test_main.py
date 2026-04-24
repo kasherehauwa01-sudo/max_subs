@@ -97,6 +97,19 @@ class TestMainHelpers(unittest.TestCase):
         finally:
             main.MAX_WEBHOOK_URL = original
 
+    def test_effective_webhook_url_from_public_base_url(self) -> None:
+        original_webhook = main.MAX_WEBHOOK_URL
+        original_domain = main.RAILWAY_PUBLIC_DOMAIN
+        with patch("main.os.getenv") as getenv_mock:
+            getenv_mock.side_effect = lambda key, default=None: {"PUBLIC_BASE_URL": "https://example.com"}.get(key, default)
+            try:
+                main.MAX_WEBHOOK_URL = ""
+                main.RAILWAY_PUBLIC_DOMAIN = ""
+                self.assertEqual(main.get_effective_webhook_url(), "https://example.com/webhook")
+            finally:
+                main.MAX_WEBHOOK_URL = original_webhook
+                main.RAILWAY_PUBLIC_DOMAIN = original_domain
+
     def test_render_miniapp_contains_only_subscribe_button(self) -> None:
         html = main.render_miniapp_html()
         self.assertIn("Подпишись на канал и получи доп.скидку -5%", html)
@@ -346,15 +359,20 @@ class TestMainHelpers(unittest.TestCase):
                 return None
 
         with patch("main.requests.post") as post_mock:
-            result = asyncio.run(
-                main.webhook(
-                    request=_Req(),
-                    background_tasks=_Bg(),
-                    x_max_bot_api_secret=None,
+            original_token = main.MAX_BOT_TOKEN
+            try:
+                main.MAX_BOT_TOKEN = "test-token"
+                result = asyncio.run(
+                    main.webhook(
+                        request=_Req(),
+                        background_tasks=_Bg(),
+                        x_max_bot_api_secret=None,
+                    )
                 )
-            )
-            self.assertEqual(result.status_code, 200)
-            post_mock.assert_called()
+                self.assertEqual(result.status_code, 200)
+                post_mock.assert_called()
+            finally:
+                main.MAX_BOT_TOKEN = original_token
 
 if __name__ == "__main__":
     unittest.main()

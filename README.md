@@ -258,6 +258,25 @@ MAX_API_BASE_URL=https://platform-api.max.ru
 
 ---
 
+## Деплой на Timeweb
+
+Для Timeweb рекомендуется задать:
+
+- `PUBLIC_BASE_URL=https://<ваш-домен>`
+- `MAX_WEBHOOK_URL=https://<ваш-домен>/webhook`  
+  (или оставить пустым, тогда код соберёт URL автоматически из `PUBLIC_BASE_URL`)
+- `APP_HOST=0.0.0.0`
+- `PORT=<порт процесса>` (как задаёт платформа)
+
+Проверки после деплоя:
+
+1. `GET https://<домен>/health` → `200`
+2. `GET https://<домен>/webhook` → `200`
+3. `GET https://<домен>/health/config` → проверьте `effective_webhook_url`
+4. В MAX подписке должен стоять именно `https://<домен>/webhook`
+
+---
+
 ## Деплой на Railway
 
 - Проект уже содержит `Procfile`:
