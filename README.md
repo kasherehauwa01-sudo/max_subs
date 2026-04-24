@@ -275,6 +275,10 @@ MAX_API_BASE_URL=https://platform-api.max.ru
 3. `GET https://<домен>/health/config` → проверьте `effective_webhook_url`
 4. В MAX подписке должен стоять именно `https://<домен>/webhook`
 
+Если забыли обновить старый `MAX_WEBHOOK_URL` после переезда с Railway,
+приложение может автоматически подхватить base URL из входящего webhook
+и строить ссылки miniapp от нового домена.
+
 ---
 
 ## Деплой на Railway

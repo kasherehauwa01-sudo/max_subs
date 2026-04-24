@@ -167,6 +167,8 @@ QR_UTM_SOURCE_VALUE = "qr_podpiska"
 QR_SUBSCRIBE_CALLBACK_DATA = "qr_subscribe_coupon"
 _qr_podpiska_users: set[str] = set()
 _qr_users_lock = threading.Lock()
+_runtime_public_base_url: Optional[str] = None
+_runtime_public_base_url_lock = threading.Lock()
 
 
 def _extract_by_paths(payload: dict[str, Any], paths: list[str]) -> Optional[Any]:
@@ -775,16 +777,42 @@ def get_miniapp_url() -> Optional[str]:
 
 
 def get_public_base_url() -> Optional[str]:
+    # 1) Явно заданный URL (рекомендуется для Timeweb/VPS).
     base_url = os.getenv("PUBLIC_BASE_URL")
     if base_url:
         return base_url.rstrip("/")
 
-    webhook_url = get_effective_webhook_url()
-    if webhook_url:
-        parsed = urlparse(webhook_url)
+    # 2) Runtime-автодетект по входящим webhook (если PUBLIC_BASE_URL не задан).
+    with _runtime_public_base_url_lock:
+        if _runtime_public_base_url:
+            return _runtime_public_base_url
+
+    # 3) Можно собрать base URL из MAX_WEBHOOK_URL.
+    if MAX_WEBHOOK_URL:
+        parsed = urlparse(MAX_WEBHOOK_URL)
         if parsed.scheme and parsed.netloc:
             return f"{parsed.scheme}://{parsed.netloc}"
+
+    # 4) Для Railway обратная совместимость.
+    if RAILWAY_PUBLIC_DOMAIN:
+        return f"https://{RAILWAY_PUBLIC_DOMAIN}"
+
     return None
+
+
+def remember_runtime_public_base_url(request: Request) -> None:
+    """
+    Запоминает публичный base URL по входящему webhook-запросу.
+    Это помогает при миграции с Railway на Timeweb, если забыли обновить MAX_WEBHOOK_URL.
+    """
+    global _runtime_public_base_url
+    try:
+        detected = str(request.base_url).rstrip("/")
+        if detected:
+            with _runtime_public_base_url_lock:
+                _runtime_public_base_url = detected
+    except Exception:
+        return
 
 
 def build_miniapp_button_attachments() -> list[dict[str, Any]]:
@@ -1801,6 +1829,7 @@ async def webhook(
 
     logger.info("Incoming MAX event: %s", json.dumps(payload, ensure_ascii=False))
     print("INCOMING:", payload)
+    remember_runtime_public_base_url(request)
 
     # Быстрый ответ по "рабочему варианту":
     # если webhook пришёл в формате message.from.id, сразу отправляем подтверждение.

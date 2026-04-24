@@ -110,6 +110,18 @@ class TestMainHelpers(unittest.TestCase):
                 main.MAX_WEBHOOK_URL = original_webhook
                 main.RAILWAY_PUBLIC_DOMAIN = original_domain
 
+    def test_miniapp_url_prefers_runtime_public_base_url(self) -> None:
+        original_webhook = main.MAX_WEBHOOK_URL
+        original_runtime = main._runtime_public_base_url
+        with patch("main.os.getenv", return_value=None):
+            try:
+                main.MAX_WEBHOOK_URL = "https://old-railway.app/webhook"
+                main._runtime_public_base_url = "https://timeweb.example.ru"
+                self.assertEqual(main.get_miniapp_url(), "https://timeweb.example.ru/miniapp")
+            finally:
+                main.MAX_WEBHOOK_URL = original_webhook
+                main._runtime_public_base_url = original_runtime
+
     def test_render_miniapp_contains_only_subscribe_button(self) -> None:
         html = main.render_miniapp_html()
         self.assertIn("Подпишись на канал и получи доп.скидку -5%", html)
@@ -373,6 +385,18 @@ class TestMainHelpers(unittest.TestCase):
                 post_mock.assert_called()
             finally:
                 main.MAX_BOT_TOKEN = original_token
+
+    def test_remember_runtime_public_base_url(self) -> None:
+        class _Req:
+            base_url = "https://timeweb.example.ru/"
+
+        original_runtime = main._runtime_public_base_url
+        try:
+            main._runtime_public_base_url = None
+            main.remember_runtime_public_base_url(_Req())
+            self.assertEqual(main._runtime_public_base_url, "https://timeweb.example.ru")
+        finally:
+            main._runtime_public_base_url = original_runtime
 
 if __name__ == "__main__":
     unittest.main()
