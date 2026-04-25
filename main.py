@@ -24,6 +24,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 logger = logging.getLogger("max-id-bot")
+BASE_URL = "https://kvasmix.ru"
 
 MAX_API_BASE_URL = os.getenv("MAX_API_BASE_URL", "https://platform-api.max.ru")
 MAX_BOT_TOKEN = os.getenv("MAX_BOT_TOKEN")
@@ -31,7 +32,7 @@ MAX_TIMEOUT_SECONDS = float(os.getenv("MAX_TIMEOUT_SECONDS", "10"))
 MAX_WEBHOOK_SECRET = os.getenv("MAX_WEBHOOK_SECRET")
 MAX_API_MAX_RETRIES = int(os.getenv("MAX_API_MAX_RETRIES", "5"))
 MAX_DEDUP_TTL_SECONDS = int(os.getenv("MAX_DEDUP_TTL_SECONDS", "3600"))
-MAX_WEBHOOK_URL = os.getenv("MAX_WEBHOOK_URL")
+MAX_WEBHOOK_URL = os.getenv("MAX_WEBHOOK_URL", f"{BASE_URL}/webhook")
 BASE_WEBHOOK_UPDATE_TYPES = [
     item.strip()
     for item in os.getenv("MAX_WEBHOOK_UPDATE_TYPES", "message_created,bot_started,message_callback").split(",")
@@ -39,7 +40,6 @@ BASE_WEBHOOK_UPDATE_TYPES = [
 ]
 MAX_WEBHOOK_AUTO_REGISTER = os.getenv("MAX_WEBHOOK_AUTO_REGISTER", "true").lower() in {"1", "true", "yes"}
 MAX_STARTUP_SELF_CHECK = os.getenv("MAX_STARTUP_SELF_CHECK", "false").lower() in {"1", "true", "yes"}
-RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN")
 MAX_CHANNEL_CHAT_ID = os.getenv("MAX_CHANNEL_CHAT_ID", "-72559954357735")
 MAX_CHANNEL_URL = os.getenv("MAX_CHANNEL_URL", f"https://web.max.ru/{MAX_CHANNEL_CHAT_ID}")
 MAX_CHANNEL_DEEPLINK = os.getenv("MAX_CHANNEL_DEEPLINK", "https://max.ru/id344309962847_biz")
@@ -167,8 +167,6 @@ QR_UTM_SOURCE_VALUE = "qr_podpiska"
 QR_SUBSCRIBE_CALLBACK_DATA = "qr_subscribe_coupon"
 _qr_podpiska_users: set[str] = set()
 _qr_users_lock = threading.Lock()
-_runtime_public_base_url: Optional[str] = None
-_runtime_public_base_url_lock = threading.Lock()
 
 
 def _extract_by_paths(payload: dict[str, Any], paths: list[str]) -> Optional[Any]:
@@ -650,14 +648,7 @@ def get_coupon_participation_date(user_id: str) -> Optional[str]:
 
 
 def get_dashboard_url() -> Optional[str]:
-    base_url = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
-    if base_url:
-        return f"{base_url}/dashboard"
-    if MAX_WEBHOOK_URL:
-        return MAX_WEBHOOK_URL.removesuffix("/webhook") + "/dashboard"
-    if RAILWAY_PUBLIC_DOMAIN:
-        return f"https://{RAILWAY_PUBLIC_DOMAIN}/dashboard"
-    return None
+    return f"{get_public_base_url()}/dashboard"
 
 
 def parse_sheet_date(raw_date: str) -> Optional[date]:
@@ -777,42 +768,7 @@ def get_miniapp_url() -> Optional[str]:
 
 
 def get_public_base_url() -> Optional[str]:
-    # 1) Явно заданный URL (рекомендуется для Timeweb/VPS).
-    base_url = os.getenv("PUBLIC_BASE_URL")
-    if base_url:
-        return base_url.rstrip("/")
-
-    # 2) Runtime-автодетект по входящим webhook (если PUBLIC_BASE_URL не задан).
-    with _runtime_public_base_url_lock:
-        if _runtime_public_base_url:
-            return _runtime_public_base_url
-
-    # 3) Можно собрать base URL из MAX_WEBHOOK_URL.
-    if MAX_WEBHOOK_URL:
-        parsed = urlparse(MAX_WEBHOOK_URL)
-        if parsed.scheme and parsed.netloc:
-            return f"{parsed.scheme}://{parsed.netloc}"
-
-    # 4) Для Railway обратная совместимость.
-    if RAILWAY_PUBLIC_DOMAIN:
-        return f"https://{RAILWAY_PUBLIC_DOMAIN}"
-
-    return None
-
-
-def remember_runtime_public_base_url(request: Request) -> None:
-    """
-    Запоминает публичный base URL по входящему webhook-запросу.
-    Это помогает при миграции с Railway на Timeweb, если забыли обновить MAX_WEBHOOK_URL.
-    """
-    global _runtime_public_base_url
-    try:
-        detected = str(request.base_url).rstrip("/")
-        if detected:
-            with _runtime_public_base_url_lock:
-                _runtime_public_base_url = detected
-    except Exception:
-        return
+    return BASE_URL
 
 
 def build_miniapp_button_attachments() -> list[dict[str, Any]]:
@@ -1118,7 +1074,7 @@ def register_webhook_subscription() -> dict[str, Any]:
     webhook_url = get_effective_webhook_url()
     if not webhook_url:
         raise RuntimeError(
-            "Webhook URL не определён. Задайте MAX_WEBHOOK_URL или RAILWAY_PUBLIC_DOMAIN."
+            "Webhook URL не определён. Задайте MAX_WEBHOOK_URL."
         )
 
     def _register_with_types(update_types: list[str]) -> requests.Response:
@@ -1150,17 +1106,11 @@ def get_effective_webhook_url() -> Optional[str]:
     """
     Возвращает webhook URL в приоритете:
     1) MAX_WEBHOOK_URL
-    2) PUBLIC_BASE_URL -> <base>/webhook
-    3) RAILWAY_PUBLIC_DOMAIN -> https://<domain>/webhook
+    2) BASE_URL -> <base>/webhook
     """
     if MAX_WEBHOOK_URL:
         return MAX_WEBHOOK_URL
-    public_base_url = get_public_base_url()
-    if public_base_url:
-        return public_base_url.rstrip("/") + "/webhook"
-    if RAILWAY_PUBLIC_DOMAIN:
-        return f"https://{RAILWAY_PUBLIC_DOMAIN}/webhook"
-    return None
+    return f"{BASE_URL}/webhook"
 
 
 def get_effective_update_types() -> list[str]:
@@ -1169,11 +1119,7 @@ def get_effective_update_types() -> list[str]:
 
 def auto_register_webhook_on_startup() -> None:
     effective_webhook_url = get_effective_webhook_url()
-    webhook_url_source = (
-        "MAX_WEBHOOK_URL"
-        if MAX_WEBHOOK_URL
-        else ("PUBLIC_BASE_URL" if get_public_base_url() else ("RAILWAY_PUBLIC_DOMAIN" if RAILWAY_PUBLIC_DOMAIN else "not_set"))
-    )
+    webhook_url_source = "MAX_WEBHOOK_URL" if MAX_WEBHOOK_URL else "BASE_URL"
     logger.info(
         "Startup config: token_set=%s webhook_url_source=%s configured_webhook_url=%s effective_webhook_url=%s auto_register=%s update_types=%s secret_set=%s self_check=%s",
         bool(MAX_BOT_TOKEN),
@@ -1187,7 +1133,7 @@ def auto_register_webhook_on_startup() -> None:
     )
     if not effective_webhook_url:
         logger.warning(
-            "Webhook URL не задан. Укажите MAX_WEBHOOK_URL или включите Public Domain в Railway (RAILWAY_PUBLIC_DOMAIN)."
+            "Webhook URL не задан. Укажите MAX_WEBHOOK_URL."
         )
 
     if MAX_STARTUP_SELF_CHECK:
@@ -1782,7 +1728,7 @@ def health_config() -> JSONResponse:
     if not MAX_BOT_TOKEN:
         issues.append("MAX_BOT_TOKEN is empty")
     if not effective_webhook_url:
-        issues.append("webhook url is empty: set MAX_WEBHOOK_URL or RAILWAY_PUBLIC_DOMAIN")
+        issues.append("webhook url is empty: set MAX_WEBHOOK_URL")
     issues.extend(get_google_sheets_config_issues())
 
     return JSONResponse(
@@ -1793,7 +1739,6 @@ def health_config() -> JSONResponse:
                 "token_set": bool(MAX_BOT_TOKEN),
                 "webhook_url": MAX_WEBHOOK_URL,
                 "public_base_url": get_public_base_url(),
-                "railway_public_domain": RAILWAY_PUBLIC_DOMAIN,
                 "effective_webhook_url": effective_webhook_url,
                 "webhook_secret_set": bool(MAX_WEBHOOK_SECRET),
                 "webhook_auto_register": MAX_WEBHOOK_AUTO_REGISTER,
@@ -1829,7 +1774,6 @@ async def webhook(
 
     logger.info("Incoming MAX event: %s", json.dumps(payload, ensure_ascii=False))
     print("INCOMING:", payload)
-    remember_runtime_public_base_url(request)
 
     # Быстрый ответ по "рабочему варианту":
     # если webhook пришёл в формате message.from.id, сразу отправляем подтверждение.
