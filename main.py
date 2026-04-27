@@ -593,9 +593,17 @@ def parse_sheet_date(raw_date: str) -> Optional[date]:
 
 
 def parse_sheet_datetime(raw_date: str, raw_time: str) -> Optional[datetime]:
-    row_date = parse_sheet_date(raw_date)
+    date_value = (raw_date or "").strip()
+    for dt_fmt in ("%d.%m.%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y.%m.%d %H:%M:%S"):
+        try:
+            return datetime.strptime(date_value, dt_fmt)
+        except ValueError:
+            continue
+
+    row_date = parse_sheet_date(date_value)
     if row_date is None:
         return None
+
     time_value = (raw_time or "").strip() or "00:00:00"
     for fmt in ("%H:%M:%S", "%H:%M"):
         try:
@@ -627,21 +635,56 @@ def aggregate_dates(dates: list[date | datetime], granularity: str) -> dict[str,
 
 def get_coupon_events_dates(start_date: date, end_date: date) -> list[datetime]:
     if not GOOGLE_SHEETS_SPREADSHEET_ID:
-        raise RuntimeError("GOOGLE_SHEETS_SPREADSHEET_ID is empty")
+        logger.warning("GOOGLE_SHEETS_SPREADSHEET_ID is empty; dashboard will return no rows")
+        return []
     url = f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEETS_SPREADSHEET_ID}/gviz/tq?tqx=out:csv"
-    response = requests.get(url, timeout=10)
+    try:
+        response = requests.get(url, timeout=10)
+    except requests.RequestException as exc:
+        logger.exception("Failed to load dashboard CSV from Google Sheets: %s", exc)
+        return []
     if response.status_code >= 400:
-        raise RuntimeError(f"Google Sheets CSV request failed: {response.status_code}")
+        logger.warning("Google Sheets CSV request failed: status=%s", response.status_code)
+        return []
 
-    reader = csv.DictReader(io.StringIO(response.text))
+    rows = list(csv.reader(io.StringIO(response.text)))
+    if not rows:
+        return []
+    header = [str(item or "").strip().lower() for item in rows[0]]
+
+    def first_index(candidates: set[str]) -> Optional[int]:
+        for idx, value in enumerate(header):
+            if value in candidates:
+                return idx
+        return None
+
+    date_idx = first_index({"дата", "date"})
+    time_idx = first_index({"время", "time"})
+    event_indices = [idx for idx, value in enumerate(header) if value in {"событие", "event"}]
+    if date_idx is None:
+        logger.warning("Google Sheets CSV has no date column in header: %s", header)
+        return []
+
     result: list[datetime] = []
-    for row in reader:
-        event_name = str(row.get("Событие") or row.get("event") or "").strip().lower()
+    for row in rows[1:]:
+        if len(row) <= date_idx:
+            continue
+        raw_date = str(row[date_idx] or "").strip()
+        raw_time = str(row[time_idx] or "").strip() if time_idx is not None and len(row) > time_idx else ""
+        event_name = ""
+        for idx in event_indices:
+            if len(row) <= idx:
+                continue
+            candidate = str(row[idx] or "").strip()
+            if candidate:
+                event_name = candidate
+                break
+        event_name = event_name.lower()
         if event_name and "скидка" not in event_name:
             continue
         row_dt = parse_sheet_datetime(
-            str(row.get("Дата") or row.get("date") or ""),
-            str(row.get("время") or row.get("Время") or row.get("time") or ""),
+            raw_date,
+            raw_time,
         )
         if row_dt is None:
             continue
