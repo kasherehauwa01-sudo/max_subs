@@ -638,14 +638,25 @@ def get_coupon_events_dates(start_date: date, end_date: date) -> list[datetime]:
     if not GOOGLE_SHEETS_SPREADSHEET_ID:
         logger.warning("GOOGLE_SHEETS_SPREADSHEET_ID is empty; dashboard will return no rows")
         return []
-    url = f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEETS_SPREADSHEET_ID}/gviz/tq?tqx=out:csv"
-    try:
-        response = requests.get(url, timeout=10)
-    except requests.RequestException as exc:
-        logger.exception("Failed to load dashboard CSV from Google Sheets: %s", exc)
-        return []
-    if response.status_code >= 400:
-        logger.warning("Google Sheets CSV request failed: status=%s", response.status_code)
+
+    candidate_urls = [
+        f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEETS_SPREADSHEET_ID}/gviz/tq?tqx=out:csv&gid=0",
+        f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEETS_SPREADSHEET_ID}/export?format=csv&gid=0",
+    ]
+    response = None
+    for url in candidate_urls:
+        try:
+            current = requests.get(url, timeout=10)
+        except requests.RequestException as exc:
+            logger.warning("Dashboard CSV request failed for url=%s: %s", url, exc)
+            continue
+        if current.status_code >= 400:
+            logger.warning("Dashboard CSV request returned status=%s for url=%s", current.status_code, url)
+            continue
+        response = current
+        break
+    if response is None:
+        logger.warning("Could not load Google Sheets CSV from any known URL")
         return []
 
     rows = list(csv.reader(io.StringIO(response.text)))
@@ -1626,7 +1637,10 @@ def render_dashboard_html() -> str:
       };
 
       periodEl.addEventListener('change', updateCustomVisibility);
-      applyBtn.addEventListener('click', loadStats);
+      applyBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        loadStats();
+      });
       updateCustomVisibility();
       loadStats();
     </script>
@@ -1689,6 +1703,7 @@ def dashboard_data(
     try:
         event_dates = get_coupon_events_dates(start_date=start_date, end_date=end_date)
         buckets = aggregate_dates(event_dates, granularity)
+        logger.info("Dashboard loaded rows=%s buckets=%s granularity=%s", len(event_dates), len(buckets), granularity)
     except Exception as exc:
         logger.exception("Dashboard data error: %s", exc)
         raise HTTPException(status_code=500, detail="Не удалось загрузить данные дашборда") from exc
