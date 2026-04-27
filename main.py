@@ -575,7 +575,7 @@ def get_coupon_participation_date(user_id: str) -> Optional[str]:
 
 
 def get_dashboard_url() -> Optional[str]:
-    return f"{get_public_base_url()}/dashboard"
+    return f"{get_public_base_url()}/max_sub/statistic"
 
 
 def parse_sheet_date(raw_date: str) -> Optional[date]:
@@ -1539,6 +1539,7 @@ def root() -> str:
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
+@app.get("/max_sub/statistic", response_class=HTMLResponse)
 def dashboard_page(user_id: str) -> str:
     if not is_dashboard_user_allowed(user_id):
         raise HTTPException(status_code=403, detail="Доступ к дашборду запрещен")

@@ -211,7 +211,7 @@ function doPost(e) {
 
 ### Дашборд статистики купонов
 
-- Endpoint интерфейса: `GET /dashboard`
+- Endpoint интерфейса: `GET /max_sub/statistic` (алиас также доступен по `GET /dashboard`)
 - Данные: `GET /dashboard/data`
 - Доступ к `/dashboard` и `/dashboard/data` разрешен только для `user_id=242649311` и `user_id=24324984`.
 - Периоды: `Вчера`, `Сегодня`, `Неделя`, `Месяц`, `Квартал`, `Ручной выбор периода`.
