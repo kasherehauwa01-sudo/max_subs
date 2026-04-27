@@ -47,7 +47,10 @@ GOOGLE_SHEETS_ENABLED = os.getenv("GOOGLE_SHEETS_ENABLED", "false").lower() in {
 GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "15nXvYljl4yqNsw_nYLpNzFIo4SLlTQyQDaD2Y77Ll-8")
 # Оставлено только для обратной совместимости старых тестов/конфига.
 GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
-GOOGLE_SCRIPT_URL = os.getenv("GOOGLE_SCRIPT_URL", "ВСТАВЬ_СЮДА_URL")
+GOOGLE_SCRIPT_URL = os.getenv(
+    "GOOGLE_SCRIPT_URL",
+    "https://script.google.com/macros/s/AKfycbx8YhwFI-zxlaGmDmYl7bMwaXye-V7pkQmLLQhnTDrFCofkvBG5WwshHuIw34r4ILEl/exec",
+)
 ACTIVE_WEBHOOK_UPDATE_TYPES: list[str] = []
 
 

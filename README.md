@@ -181,7 +181,7 @@ function doPost(e) {
 В переменные окружения сервиса добавьте:
 
 - `GOOGLE_SHEETS_ENABLED=true`
-- `GOOGLE_SCRIPT_URL=<URL вашего Apps Script web app>`
+- `GOOGLE_SCRIPT_URL=https://script.google.com/macros/s/AKfycbx8YhwFI-zxlaGmDmYl7bMwaXye-V7pkQmLLQhnTDrFCofkvBG5WwshHuIw34r4ILEl/exec`
 
 После сохранения сделайте **Redeploy/Restart**.
 
