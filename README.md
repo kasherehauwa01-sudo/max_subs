@@ -127,32 +127,53 @@ curl http://localhost:8000/health
 curl http://localhost:8000/health/max
 ```
 
-## Интеграция Google Sheets (Railway)
+## Интеграция Google Sheets (Timeweb)
 
-Чтобы писать события отправки купона в таблицу  
-`https://docs.google.com/spreadsheets/d/15nXvYljl4yqNsw_nYLpNzFIo4SLlTQyQDaD2Y77Ll-8/edit?gid=0#gid=0`:
+Чтобы бот отправлял события выдачи купона в Google Sheets на Timeweb, настройте таблицу и secrets в панели Timeweb.
 
-1. В таблице создайте заголовки в строке 1:
-   - `Дата`
-   - `время`
-   - `user_id`
-   - `Событие`
-2. Начиная со 2-й строки бот будет добавлять записи в эти колонки.
-3. Создайте Service Account в Google Cloud и скачайте JSON-ключ.
-4. Дайте этому service account доступ **Editor** к таблице (поделитесь таблицей на e-mail service account).
-5. В Railway добавьте переменные:
-   - `GOOGLE_SHEETS_ENABLED=true`
-   - `GOOGLE_SHEETS_SPREADSHEET_ID=15nXvYljl4yqNsw_nYLpNzFIo4SLlTQyQDaD2Y77Ll-8`
-   - `GOOGLE_SHEETS_WORKSHEET=` (пусто для первого листа или укажите имя листа)
-   - `GOOGLE_SERVICE_ACCOUNT_JSON=<raw JSON | JSON в кавычках | base64(JSON) | путь к JSON-файлу>`
-6. Перезапустите сервис.
+### 1) Подготовьте Google Таблицу
 
-> Если в логах видите `No key could be detected`, обычно причина в `private_key`:
-> в Railway внутри JSON должны быть `\\n` (двойной backslash + n).  
-> Код автоматически преобразует `\\n` в реальные переносы строк перед авторизацией.
->
-> Для диагностики откройте `GET /health/config` — там в `config.issues` будут причины
-> (например, ошибка разбора `GOOGLE_SERVICE_ACCOUNT_JSON` или отсутствие обязательных полей).
+Таблица проекта:
+`https://docs.google.com/spreadsheets/d/15nXvYljl4yqNsw_nYLpNzFIo4SLlTQyQDaD2Y77Ll-8/edit?gid=0#gid=0`
+
+В строке 1 создайте заголовки:
+- `Дата`
+- `время`
+- `user_id`
+- `Событие`
+
+Начиная со 2-й строки бот будет добавлять записи в эти колонки.
+
+### 2) Создайте Service Account в Google Cloud
+
+1. Откройте Google Cloud Console → **IAM & Admin** → **Service Accounts**.
+2. Создайте service account (например, `max-id-bot-sheets`).
+3. Создайте ключ типа **JSON** и скачайте файл.
+4. Откройте Google Таблицу → **Поделиться** → добавьте e-mail service account с правами **Editor**.
+
+### 3) Добавьте Secrets/переменные в Timeweb
+
+В панели Timeweb откройте ваш сервис с ботом и добавьте переменные окружения:
+
+- `GOOGLE_SHEETS_ENABLED=true`
+- `GOOGLE_SHEETS_SPREADSHEET_ID=15nXvYljl4yqNsw_nYLpNzFIo4SLlTQyQDaD2Y77Ll-8`
+- `GOOGLE_SHEETS_WORKSHEET=`  
+  (оставьте пустым для первого листа, либо укажите точное имя вкладки)
+- `GOOGLE_SERVICE_ACCOUNT_JSON=<содержимое JSON-ключа service account>`
+
+Рекомендация для `GOOGLE_SERVICE_ACCOUNT_JSON`:
+- вставляйте JSON одной строкой;
+- в `private_key` переносы строк должны быть в виде `\\n`.
+
+После сохранения secrets выполните **Redeploy/Restart** сервиса.
+
+### 4) Проверка, что связь Timeweb ↔ Google Sheets работает
+
+1. Откройте `GET /health/config`.
+2. Убедитесь, что в `config.issues` нет ошибок по Google Sheets.
+3. Отправьте тестовый сценарий выдачи купона и проверьте, что в таблице появилась новая строка.
+
+> Если в логах есть ошибка `No key could be detected`, чаще всего неверно заполнен `GOOGLE_SERVICE_ACCOUNT_JSON` (обычно проблема в формате `private_key`).
 
 При отправке купона бот добавляет строку:
 - `Дата` — YYYY-MM-DD (UTC)
