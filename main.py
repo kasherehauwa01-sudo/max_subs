@@ -54,6 +54,7 @@ GOOGLE_SCRIPT_URL = os.getenv(
     "https://script.google.com/macros/s/AKfycbx8YhwFI-zxlaGmDmYl7bMwaXye-V7pkQmLLQhnTDrFCofkvBG5WwshHuIw34r4ILEl/exec",
 )
 ACTIVE_WEBHOOK_UPDATE_TYPES: list[str] = []
+MOSCOW_TZ = timezone(timedelta(hours=3))
 
 
 def get_channel_id_candidates() -> list[str]:
@@ -680,7 +681,7 @@ def get_coupon_events_dates(start_date: date, end_date: date) -> list[datetime]:
                 event_name = candidate
                 break
         event_name = event_name.lower()
-        if event_name and "скидка" not in event_name:
+        if event_name and "скидка" not in event_name and "coupon_sent" not in event_name:
             continue
         row_dt = parse_sheet_datetime(
             raw_date,
@@ -1684,7 +1685,7 @@ def dashboard_data(
     if granularity not in {"hour", "day", "week", "month"}:
         raise HTTPException(status_code=400, detail="granularity должен быть hour, day, week или month")
 
-    start_date, end_date = resolve_period_dates(period, date_from, date_to, datetime.now(timezone.utc))
+    start_date, end_date = resolve_period_dates(period, date_from, date_to, datetime.now(MOSCOW_TZ))
     try:
         event_dates = get_coupon_events_dates(start_date=start_date, end_date=end_date)
         buckets = aggregate_dates(event_dates, granularity)
