@@ -1496,6 +1496,8 @@ def render_dashboard_html() -> str:
       .meta { margin-top: 8px; font-size: 13px; color: #475569; }
       .err { color: #b91c1c; margin-top: 8px; font-size: 14px; }
       .hidden { display: none; }
+      #fallbackChart { margin-top: 12px; }
+      .fallback-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 6px 0; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
     </style>
   </head>
   <body>
@@ -1537,6 +1539,7 @@ def render_dashboard_html() -> str:
           </div>
         </div>
         <canvas id="statsChart" height="120"></canvas>
+        <div id="fallbackChart" class="hidden"></div>
         <div id="meta" class="meta"></div>
         <div id="error" class="err"></div>
       </div>
@@ -1552,6 +1555,7 @@ def render_dashboard_html() -> str:
       const metaEl = document.getElementById('meta');
       const errorEl = document.getElementById('error');
       const ctx = document.getElementById('statsChart');
+      const fallbackChartEl = document.getElementById('fallbackChart');
       const dashboardUserId = new URLSearchParams(window.location.search).get('user_id') || '';
       let chart;
 
@@ -1562,12 +1566,26 @@ def render_dashboard_html() -> str:
       };
 
       const renderChart = (labels, values) => {
+        const safeLabels = labels.length ? labels : ['Нет данных'];
+        const safeValues = values.length ? values : [0];
+
+        if (typeof Chart === 'undefined') {
+          ctx.classList.add('hidden');
+          fallbackChartEl.classList.remove('hidden');
+          fallbackChartEl.innerHTML = safeLabels.map((label, idx) =>
+            `<div class="fallback-row"><span>${label}</span><strong>${safeValues[idx] ?? 0}</strong></div>`
+          ).join('');
+          return;
+        }
+
+        ctx.classList.remove('hidden');
+        fallbackChartEl.classList.add('hidden');
         if (chart) chart.destroy();
         chart = new Chart(ctx, {
           type: 'bar',
           data: {
-            labels,
-            datasets: [{ label: 'Отправленные купоны', data: values, backgroundColor: '#2563eb' }]
+            labels: safeLabels,
+            datasets: [{ label: 'Отправленные купоны', data: safeValues, backgroundColor: '#2563eb' }]
           },
           options: {
             responsive: true,
