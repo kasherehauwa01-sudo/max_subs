@@ -48,6 +48,7 @@ GOOGLE_SHEETS_ENABLED = os.getenv("GOOGLE_SHEETS_ENABLED", "false").lower() in {
 GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "15nXvYljl4yqNsw_nYLpNzFIo4SLlTQyQDaD2Y77Ll-8")
 GOOGLE_SHEETS_WORKSHEET = os.getenv("GOOGLE_SHEETS_WORKSHEET", "")
 GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "/root/max_subs/google.json")
 ACTIVE_WEBHOOK_UPDATE_TYPES: list[str] = []
 
 
@@ -521,14 +522,11 @@ def send_max_message(
     raise HTTPException(status_code=502, detail=f"MAX API недоступен после ретраев: {last_error}")
 
 
-def log_coupon_event_to_google_sheet(user_id: Optional[str], event_name: str = "Скидка за подписку") -> None:
+def log_to_sheets(user_id: int, event: str) -> None:
     if not GOOGLE_SHEETS_ENABLED:
         return
-    uid = str(user_id or "").strip()
+    uid = str(user_id).strip()
     if not uid:
-        return
-    if not GOOGLE_SERVICE_ACCOUNT_JSON:
-        logger.warning("GOOGLE_SHEETS_ENABLED=true, но GOOGLE_SERVICE_ACCOUNT_JSON не задан")
         return
 
     try:
@@ -536,31 +534,43 @@ def log_coupon_event_to_google_sheet(user_id: Optional[str], event_name: str = "
         import gspread  # type: ignore[import-not-found]
         from google.oauth2.service_account import Credentials  # type: ignore[import-not-found]
 
-        account_info = parse_google_service_account(GOOGLE_SERVICE_ACCOUNT_JSON)
-
-        account_info = normalize_service_account_info(account_info)
-
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive.readonly",
         ]
-        credentials = Credentials.from_service_account_info(account_info, scopes=scopes)
+        if GOOGLE_SERVICE_ACCOUNT_JSON:
+            account_info = normalize_service_account_info(parse_google_service_account(GOOGLE_SERVICE_ACCOUNT_JSON))
+            credentials = Credentials.from_service_account_info(account_info, scopes=scopes)
+        else:
+            credentials = Credentials.from_service_account_file(GOOGLE_SERVICE_ACCOUNT_FILE, scopes=scopes)
+
         client = gspread.authorize(credentials)
         spreadsheet = client.open_by_key(GOOGLE_SHEETS_SPREADSHEET_ID)
-        worksheet = spreadsheet.worksheet(GOOGLE_SHEETS_WORKSHEET) if GOOGLE_SHEETS_WORKSHEET else spreadsheet.sheet1
+        worksheet = spreadsheet.sheet1
 
         now = datetime.now(timezone.utc)
+        print(f"ПИШУ В ТАБЛИЦУ: user_id={uid}, event={event}")
         worksheet.append_row(
             [
                 now.strftime("%Y-%m-%d"),
                 now.strftime("%H:%M:%S"),
                 uid,
-                event_name,
+                event,
             ],
             value_input_option="USER_ENTERED",
         )
     except Exception as exc:
-        logger.exception("Не удалось записать событие купона в Google Sheets: %s", exc)
+        logger.exception("Не удалось записать событие в Google Sheets для user_id=%s: %s", uid, exc)
+
+
+def log_coupon_event_to_google_sheet(user_id: Optional[str], event_name: str = "Скидка за подписку") -> None:
+    uid = str(user_id or "").strip()
+    if not uid:
+        return
+    try:
+        log_to_sheets(int(uid), event_name)
+    except ValueError:
+        logger.warning("Некорректный user_id для записи в Google Sheets: %s", uid)
 
 
 def normalize_service_account_info(account_info: dict[str, Any]) -> dict[str, Any]:
@@ -714,7 +724,6 @@ def is_dashboard_user_allowed(user_id: Optional[str]) -> bool:
 
 
 def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
-    log_coupon_event_to_google_sheet(user_id=user_id, event_name="Скидка за подписку")
     barcode_value, expiry_date = get_coupon_barcode_and_expiry()
     coupon_text = build_coupon_text(expiry_date)
 
@@ -728,6 +737,7 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
                 chat_id=chat_id,
                 attachments=[{"type": "image", "payload": {"token": token}}],
             )
+            log_coupon_event_to_google_sheet(user_id=user_id, event_name="coupon_sent")
     except Exception as exc:
         logger.exception("Не удалось отправить изображение купона, отправляем fallback без цифрового кода: %s", exc)
         send_max_message(
@@ -739,6 +749,7 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
             user_id=user_id,
             chat_id=chat_id,
         )
+        log_coupon_event_to_google_sheet(user_id=user_id, event_name="coupon_sent")
 
 
 def _send_coupon_after_subscribe_click(user_id: str) -> None:
