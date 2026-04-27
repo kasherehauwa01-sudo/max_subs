@@ -1,4 +1,6 @@
 import hmac
+import csv
+import io
 import json
 import logging
 import os
@@ -582,7 +584,7 @@ def parse_sheet_date(raw_date: str) -> Optional[date]:
     value = (raw_date or "").strip()
     if not value:
         return None
-    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"):
+    for fmt in ("%Y-%m-%d", "%Y.%m.%d", "%d.%m.%Y", "%d/%m/%Y"):
         try:
             return datetime.strptime(value, fmt).date()
         except ValueError:
@@ -590,25 +592,62 @@ def parse_sheet_date(raw_date: str) -> Optional[date]:
     return None
 
 
-def aggregate_dates(dates: list[date], granularity: str) -> dict[str, int]:
+def parse_sheet_datetime(raw_date: str, raw_time: str) -> Optional[datetime]:
+    row_date = parse_sheet_date(raw_date)
+    if row_date is None:
+        return None
+    time_value = (raw_time or "").strip() or "00:00:00"
+    for fmt in ("%H:%M:%S", "%H:%M"):
+        try:
+            row_time = datetime.strptime(time_value, fmt).time()
+            return datetime.combine(row_date, row_time)
+        except ValueError:
+            continue
+    return datetime.combine(row_date, datetime.min.time())
+
+
+def aggregate_dates(dates: list[date | datetime], granularity: str) -> dict[str, int]:
     buckets: dict[str, int] = {}
     for dt in dates:
-        if granularity == "week":
-            iso_year, iso_week, _ = dt.isocalendar()
+        dt_value = dt if isinstance(dt, datetime) else datetime.combine(dt, datetime.min.time())
+        if granularity == "hour":
+            key = dt_value.strftime("%Y-%m-%d %H:00")
+        elif granularity == "week":
+            iso_year, iso_week, _ = dt_value.isocalendar()
             key = f"{iso_year}-W{iso_week:02d}"
         elif granularity == "month":
-            key = dt.strftime("%Y-%m")
+            key = dt_value.strftime("%Y-%m")
+        elif granularity == "day":
+            key = dt_value.strftime("%Y-%m-%d")
         else:
-            key = dt.strftime("%Y-%m-%d")
+            key = dt_value.strftime("%Y-%m-%d")
         buckets[key] = buckets.get(key, 0) + 1
     return dict(sorted(buckets.items(), key=lambda x: x[0]))
 
 
-def get_coupon_events_dates(start_date: date, end_date: date) -> list[date]:
-    # Данные дашборда из Google Sheets через credentials отключены.
-    # Сохраняем стабильность endpoint'ов: возвращаем пустой набор.
-    _ = (start_date, end_date)
-    return []
+def get_coupon_events_dates(start_date: date, end_date: date) -> list[datetime]:
+    if not GOOGLE_SHEETS_SPREADSHEET_ID:
+        raise RuntimeError("GOOGLE_SHEETS_SPREADSHEET_ID is empty")
+    url = f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEETS_SPREADSHEET_ID}/gviz/tq?tqx=out:csv"
+    response = requests.get(url, timeout=10)
+    if response.status_code >= 400:
+        raise RuntimeError(f"Google Sheets CSV request failed: {response.status_code}")
+
+    reader = csv.DictReader(io.StringIO(response.text))
+    result: list[datetime] = []
+    for row in reader:
+        event_name = str(row.get("Событие") or row.get("event") or "").strip().lower()
+        if event_name and "скидка" not in event_name:
+            continue
+        row_dt = parse_sheet_datetime(
+            str(row.get("Дата") or row.get("date") or ""),
+            str(row.get("время") or row.get("Время") or row.get("time") or ""),
+        )
+        if row_dt is None:
+            continue
+        if start_date <= row_dt.date() <= end_date:
+            result.append(row_dt)
+    return result
 
 
 def is_dashboard_user_allowed(user_id: Optional[str]) -> bool:
@@ -1436,6 +1475,7 @@ def render_dashboard_html() -> str:
             <label for="granularity">Детализация</label>
             <select id="granularity">
               <option value="day" selected>По дням</option>
+              <option value="hour">По часам</option>
               <option value="week">По неделям</option>
               <option value="month">По месяцам</option>
             </select>
@@ -1580,8 +1620,8 @@ def dashboard_data(
 ) -> JSONResponse:
     if not is_dashboard_user_allowed(user_id):
         raise HTTPException(status_code=403, detail="Доступ к дашборду запрещен")
-    if granularity not in {"day", "week", "month"}:
-        raise HTTPException(status_code=400, detail="granularity должен быть day, week или month")
+    if granularity not in {"hour", "day", "week", "month"}:
+        raise HTTPException(status_code=400, detail="granularity должен быть hour, day, week или month")
 
     start_date, end_date = resolve_period_dates(period, date_from, date_to, datetime.now(timezone.utc))
     try:
