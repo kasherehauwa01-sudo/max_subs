@@ -508,30 +508,39 @@ def send_max_message(
 
 def log_to_sheets(user_id: int, event: str) -> None:
     if not GOOGLE_SHEETS_ENABLED:
+        print("Sheets отключен")
         return
     if not GOOGLE_SCRIPT_URL or GOOGLE_SCRIPT_URL == "ВСТАВЬ_СЮДА_URL":
-        print("Ошибка записи в Google Sheets: GOOGLE_SCRIPT_URL не задан")
+        print("Ошибка: GOOGLE_SCRIPT_URL не задан")
         return
     uid = str(user_id).strip()
     if not uid:
+        print("Ошибка: пустой user_id")
         return
 
     payload = {
         "user_id": int(uid),
         "event": event,
     }
-    print("Отправка данных в Google Sheets...")
+    print("📤 Отправка в Google Sheets:", payload)
     try:
-        requests.post(GOOGLE_SCRIPT_URL, json=payload, timeout=5)
-        print(f"LOG → Sheets: user_id={uid}, event={event}")
+        response = requests.post(
+            GOOGLE_SCRIPT_URL,
+            json=payload,
+            timeout=5,
+        )
+        print("📥 Ответ Google Script:", response.status_code, response.text)
+        if response.status_code != 200:
+            print("❌ Google Script вернул не 200")
     except Exception as e:
-        print(f"Ошибка записи в Google Sheets: {e}")
+        print("❌ Ошибка отправки в Google Sheets:", e)
 
 
 def log_coupon_event_to_google_sheet(user_id: Optional[str], event_name: str = "coupon_sent") -> None:
     uid = str(user_id or "").strip()
     if not uid:
         return
+    print(f"LOG EVENT: user_id={uid}, event={event_name}")
     try:
         log_to_sheets(int(uid), event_name)
     except Exception as exc:
