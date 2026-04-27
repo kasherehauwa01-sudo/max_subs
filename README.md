@@ -127,9 +127,9 @@ curl http://localhost:8000/health
 curl http://localhost:8000/health/max
 ```
 
-## Интеграция Google Sheets (Timeweb)
+## Интеграция Google Sheets (Timeweb + Google Apps Script)
 
-Чтобы бот отправлял события выдачи купона в Google Sheets на Timeweb, настройте таблицу и secrets в панели Timeweb.
+Чтобы бот писал события выдачи купона в Google Sheets, используется webhook Google Apps Script (`GOOGLE_SCRIPT_URL`).
 
 ### 1) Подготовьте Google Таблицу
 
@@ -142,42 +142,60 @@ curl http://localhost:8000/health/max
 - `user_id`
 - `Событие`
 
-Начиная со 2-й строки бот будет добавлять записи в эти колонки.
+### 2) Создайте Apps Script
 
-### 2) Создайте Service Account в Google Cloud
+Откройте таблицу → **Extensions → Apps Script** и вставьте код:
 
-1. Откройте Google Cloud Console → **IAM & Admin** → **Service Accounts**.
-2. Создайте service account (например, `max-id-bot-sheets`).
-3. Создайте ключ типа **JSON** и скачайте файл.
-4. Откройте Google Таблицу → **Поделиться** → добавьте e-mail service account с правами **Editor**.
+```javascript
+function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  
+  var data = JSON.parse(e.postData.contents);
+  
+  var now = new Date();
+  
+  var date = Utilities.formatDate(now, "Europe/Moscow", "yyyy.MM.dd");
+  var time = Utilities.formatDate(now, "Europe/Moscow", "HH:mm:ss");
+  
+  sheet.appendRow([
+    date,                     // Дата
+    time,                     // Время
+    data.user_id,             // user_id
+    "Скидка за подписку"      // Событие
+  ]);
 
-### 3) Добавьте Secrets/переменные в Timeweb
+  return ContentService.createTextOutput("OK");
+}
+```
 
-В панели Timeweb откройте ваш сервис с ботом и добавьте переменные окружения:
+### 3) Опубликуйте веб‑приложение
+
+1. Нажмите **Deploy → New deployment**.
+2. Тип: **Web app**.
+3. `Execute as`: **Me**.
+4. `Who has access`: **Anyone** (или по вашей политике доступа).
+5. Скопируйте URL веб‑приложения.
+
+### 4) Добавьте secret в Timeweb
+
+В переменные окружения сервиса добавьте:
 
 - `GOOGLE_SHEETS_ENABLED=true`
-- `GOOGLE_SHEETS_SPREADSHEET_ID=15nXvYljl4yqNsw_nYLpNzFIo4SLlTQyQDaD2Y77Ll-8`
-- `GOOGLE_SHEETS_WORKSHEET=`  
-  (оставьте пустым для первого листа, либо укажите точное имя вкладки)
-- `GOOGLE_SERVICE_ACCOUNT_JSON=<содержимое JSON-ключа service account>`
+- `GOOGLE_SCRIPT_URL=<URL вашего Apps Script web app>`
 
-Рекомендация для `GOOGLE_SERVICE_ACCOUNT_JSON`:
-- вставляйте JSON одной строкой;
-- в `private_key` переносы строк должны быть в виде `\\n`.
+После сохранения сделайте **Redeploy/Restart**.
 
-После сохранения secrets выполните **Redeploy/Restart** сервиса.
+### 5) Проверка
 
-### 4) Проверка, что связь Timeweb ↔ Google Sheets работает
-
-1. Откройте `GET /health/config`.
-2. Убедитесь, что в `config.issues` нет ошибок по Google Sheets.
-3. Отправьте тестовый сценарий выдачи купона и проверьте, что в таблице появилась новая строка.
-
-> Если в логах есть ошибка `No key could be detected`, чаще всего неверно заполнен `GOOGLE_SERVICE_ACCOUNT_JSON` (обычно проблема в формате `private_key`).
+1. Выполните сценарий отправки купона.
+2. В логах бота должны появляться:
+   - `📤 Отправка в Google Sheets: ...`
+   - `📥 Ответ Google Script: 200 OK` (или код ошибки).
+3. Убедитесь, что в таблице появилась новая строка.
 
 При отправке купона бот добавляет строку:
-- `Дата` — YYYY-MM-DD (UTC)
-- `время` — HH:MM:SS (UTC)
+- `Дата` — YYYY.MM.DD (`Europe/Moscow`)
+- `время` — HH:MM:SS (`Europe/Moscow`)
 - `user_id` — id пользователя
 - `Событие` — `Скидка за подписку`
 

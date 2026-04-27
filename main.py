@@ -536,7 +536,7 @@ def log_to_sheets(user_id: int, event: str) -> None:
         print("❌ Ошибка отправки в Google Sheets:", e)
 
 
-def log_coupon_event_to_google_sheet(user_id: Optional[str], event_name: str = "coupon_sent") -> None:
+def log_coupon_event_to_google_sheet(user_id: Optional[str], event_name: str = "Скидка за подписку") -> None:
     uid = str(user_id or "").strip()
     if not uid:
         return
@@ -627,7 +627,7 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
                 chat_id=chat_id,
                 attachments=[{"type": "image", "payload": {"token": token}}],
             )
-            log_coupon_event_to_google_sheet(user_id, "coupon_sent")
+            log_coupon_event_to_google_sheet(user_id, "Скидка за подписку")
     except Exception as exc:
         logger.exception("Не удалось отправить изображение купона, отправляем fallback без цифрового кода: %s", exc)
         send_max_message(
@@ -639,7 +639,7 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
             user_id=user_id,
             chat_id=chat_id,
         )
-        log_coupon_event_to_google_sheet(user_id, "coupon_sent")
+        log_coupon_event_to_google_sheet(user_id, "Скидка за подписку")
 
 
 def _send_coupon_after_subscribe_click(user_id: str) -> None:
