@@ -1,5 +1,4 @@
 import hmac
-import base64
 import json
 import logging
 import os
@@ -46,8 +45,9 @@ MAX_CHANNEL_DEEPLINK = os.getenv("MAX_CHANNEL_DEEPLINK", "https://max.ru/id34430
 MAX_WEB_APP = os.getenv("MAX_WEB_APP")
 GOOGLE_SHEETS_ENABLED = os.getenv("GOOGLE_SHEETS_ENABLED", "false").lower() in {"1", "true", "yes"}
 GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "15nXvYljl4yqNsw_nYLpNzFIo4SLlTQyQDaD2Y77Ll-8")
-GOOGLE_SHEETS_WORKSHEET = os.getenv("GOOGLE_SHEETS_WORKSHEET", "")
+# Оставлено только для обратной совместимости старых тестов/конфига.
 GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+GOOGLE_SCRIPT_URL = os.getenv("GOOGLE_SCRIPT_URL", "ВСТАВЬ_СЮДА_URL")
 ACTIVE_WEBHOOK_UPDATE_TYPES: list[str] = []
 
 
@@ -116,39 +116,24 @@ def _contains_substring_recursive(value: Any, needle: str) -> bool:
 
 
 def parse_google_service_account(raw_value: str) -> dict[str, Any]:
-    """
-    Разбирает GOOGLE_SERVICE_ACCOUNT_JSON из env в одном из форматов:
-    - raw JSON;
-    - JSON, обёрнутый в одинарные/двойные кавычки;
-    - base64(JSON);
-    - путь к локальному JSON-файлу.
-    """
+    """Legacy helper (unused): parse JSON string into dict."""
     raw = (raw_value or "").strip()
     if not raw:
         raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON пустой")
-
-    # Частый случай для Railway/UI: JSON целиком вставлен как строка в кавычках.
     if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {"'", '"'}:
         raw = raw[1:-1].strip()
-
-    # Ещё один частый случай: JSON внутри строки экранирован как {\"key\":\"value\"}.
     if raw.startswith("{\\"):
         raw = raw.replace('\\"', '"')
+    return json.loads(raw)
 
-    if raw.startswith("{"):
-        return json.loads(raw)
 
-    if raw.startswith("eyJ"):  # Частый префикс base64(JSON).
-        decoded = base64.b64decode(raw).decode("utf-8")
-        return json.loads(decoded)
-
-    file_path = Path(raw)
-    if file_path.exists():
-        return json.loads(file_path.read_text(encoding="utf-8"))
-
-    raise ValueError(
-        "Не удалось распознать GOOGLE_SERVICE_ACCOUNT_JSON: ожидается JSON, base64(JSON) или путь к JSON-файлу"
-    )
+def normalize_service_account_info(account_info: dict[str, Any]) -> dict[str, Any]:
+    """Legacy helper (unused): normalize escaped newlines in private_key."""
+    normalized = dict(account_info)
+    private_key = normalized.get("private_key")
+    if isinstance(private_key, str):
+        normalized["private_key"] = private_key.replace("\\n", "\n")
+    return normalized
 
 
 app = FastAPI(title="MAX ID Bot", version="1.2.0")
@@ -521,58 +506,45 @@ def send_max_message(
     raise HTTPException(status_code=502, detail=f"MAX API недоступен после ретраев: {last_error}")
 
 
-def log_coupon_event_to_google_sheet(user_id: Optional[str], event_name: str = "Скидка за подписку") -> None:
+def log_to_sheets(user_id: int, event: str) -> None:
     if not GOOGLE_SHEETS_ENABLED:
+        print("Sheets отключен")
         return
+    if not GOOGLE_SCRIPT_URL or GOOGLE_SCRIPT_URL == "ВСТАВЬ_СЮДА_URL":
+        print("Ошибка: GOOGLE_SCRIPT_URL не задан")
+        return
+    uid = str(user_id).strip()
+    if not uid:
+        print("Ошибка: пустой user_id")
+        return
+
+    payload = {
+        "user_id": int(uid),
+        "event": event,
+    }
+    print("📤 Отправка в Google Sheets:", payload)
+    try:
+        response = requests.post(
+            GOOGLE_SCRIPT_URL,
+            json=payload,
+            timeout=5,
+        )
+        print("📥 Ответ Google Script:", response.status_code, response.text)
+        if response.status_code != 200:
+            print("❌ Google Script вернул не 200")
+    except Exception as e:
+        print("❌ Ошибка отправки в Google Sheets:", e)
+
+
+def log_coupon_event_to_google_sheet(user_id: Optional[str], event_name: str = "Скидка за подписку") -> None:
     uid = str(user_id or "").strip()
     if not uid:
         return
-    if not GOOGLE_SERVICE_ACCOUNT_JSON:
-        logger.warning("GOOGLE_SHEETS_ENABLED=true, но GOOGLE_SERVICE_ACCOUNT_JSON не задан")
-        return
-
+    print(f"LOG EVENT: user_id={uid}, event={event_name}")
     try:
-        # Ленивый импорт: чтобы приложение работало и без google-зависимостей.
-        import gspread  # type: ignore[import-not-found]
-        from google.oauth2.service_account import Credentials  # type: ignore[import-not-found]
-
-        account_info = parse_google_service_account(GOOGLE_SERVICE_ACCOUNT_JSON)
-
-        account_info = normalize_service_account_info(account_info)
-
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive.readonly",
-        ]
-        credentials = Credentials.from_service_account_info(account_info, scopes=scopes)
-        client = gspread.authorize(credentials)
-        spreadsheet = client.open_by_key(GOOGLE_SHEETS_SPREADSHEET_ID)
-        worksheet = spreadsheet.worksheet(GOOGLE_SHEETS_WORKSHEET) if GOOGLE_SHEETS_WORKSHEET else spreadsheet.sheet1
-
-        now = datetime.now(timezone.utc)
-        worksheet.append_row(
-            [
-                now.strftime("%Y-%m-%d"),
-                now.strftime("%H:%M:%S"),
-                uid,
-                event_name,
-            ],
-            value_input_option="USER_ENTERED",
-        )
+        log_to_sheets(int(uid), event_name)
     except Exception as exc:
-        logger.exception("Не удалось записать событие купона в Google Sheets: %s", exc)
-
-
-def normalize_service_account_info(account_info: dict[str, Any]) -> dict[str, Any]:
-    """
-    Нормализует service account JSON для Railway/env:
-    - заменяет экранированные \\n в private_key на реальные переносы строк.
-    """
-    normalized = dict(account_info)
-    private_key = normalized.get("private_key")
-    if isinstance(private_key, str):
-        normalized["private_key"] = private_key.replace("\\n", "\n")
-    return normalized
+        print(f"Ошибка записи в Google Sheets: {exc}")
 
 
 def get_google_sheets_config_issues() -> list[str]:
@@ -580,27 +552,13 @@ def get_google_sheets_config_issues() -> list[str]:
     if not GOOGLE_SHEETS_ENABLED:
         return issues
 
-    if not GOOGLE_SHEETS_SPREADSHEET_ID:
-        issues.append("GOOGLE_SHEETS_SPREADSHEET_ID is empty")
-    if not GOOGLE_SERVICE_ACCOUNT_JSON:
-        issues.append("GOOGLE_SERVICE_ACCOUNT_JSON is empty")
-        return issues
-
-    try:
-        info = normalize_service_account_info(parse_google_service_account(GOOGLE_SERVICE_ACCOUNT_JSON))
-    except Exception as exc:
-        issues.append(f"GOOGLE_SERVICE_ACCOUNT_JSON parse error: {exc}")
-        return issues
-
-    required_fields = ["type", "project_id", "private_key", "client_email", "token_uri"]
-    for field in required_fields:
-        value = str(info.get(field) or "").strip()
-        if not value:
-            issues.append(f"GOOGLE_SERVICE_ACCOUNT_JSON missing field: {field}")
-
-    private_key = str(info.get("private_key") or "")
-    if private_key and ("BEGIN PRIVATE KEY" not in private_key or "END PRIVATE KEY" not in private_key):
-        issues.append("GOOGLE_SERVICE_ACCOUNT_JSON.private_key looks invalid (missing BEGIN/END PRIVATE KEY)")
+    if not GOOGLE_SCRIPT_URL or GOOGLE_SCRIPT_URL == "ВСТАВЬ_СЮДА_URL":
+        issues.append("GOOGLE_SCRIPT_URL is empty")
+    if GOOGLE_SERVICE_ACCOUNT_JSON:
+        try:
+            parse_google_service_account(GOOGLE_SERVICE_ACCOUNT_JSON)
+        except Exception as exc:
+            issues.append(f"GOOGLE_SERVICE_ACCOUNT_JSON parse error: {exc}")
     return issues
 
 
@@ -609,41 +567,7 @@ def get_coupon_participation_date(user_id: str) -> Optional[str]:
     Возвращает дату первого участия пользователя в акции из Google Sheets в формате DD.MM.YYYY.
     Ищет строку по колонке `user_id` (или `User ID`) и берёт дату из колонки `Дата` (или `date`).
     """
-    uid = str(user_id or "").strip()
-    if not uid or not GOOGLE_SHEETS_ENABLED or not GOOGLE_SERVICE_ACCOUNT_JSON:
-        return None
-
-    try:
-        import gspread  # type: ignore[import-not-found]
-        from google.oauth2.service_account import Credentials  # type: ignore[import-not-found]
-
-        account_info = normalize_service_account_info(parse_google_service_account(GOOGLE_SERVICE_ACCOUNT_JSON))
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive.readonly",
-        ]
-        credentials = Credentials.from_service_account_info(account_info, scopes=scopes)
-        client = gspread.authorize(credentials)
-        spreadsheet = client.open_by_key(GOOGLE_SHEETS_SPREADSHEET_ID)
-        worksheet = spreadsheet.worksheet(GOOGLE_SHEETS_WORKSHEET) if GOOGLE_SHEETS_WORKSHEET else spreadsheet.sheet1
-
-        records = worksheet.get_all_records()
-        for row in records:
-            row_uid = str(row.get("user_id") or row.get("User ID") or "").strip()
-            if row_uid != uid:
-                continue
-            raw_date = str(row.get("Дата") or row.get("date") or "").strip()
-            if not raw_date:
-                return None
-            try:
-                parsed = datetime.strptime(raw_date, "%Y-%m-%d")
-                return parsed.strftime("%d.%m.%Y")
-            except ValueError:
-                # Если дата в таблице уже в нужном формате или кастомном — отдаём как есть.
-                return raw_date
-    except Exception as exc:
-        logger.exception("Не удалось прочитать дату участия из Google Sheets для user_id=%s: %s", uid, exc)
-
+    # Сценарий чтения из таблицы отключён: запись в Google Sheets выполняется через Apps Script webhook.
     return None
 
 
@@ -678,34 +602,10 @@ def aggregate_dates(dates: list[date], granularity: str) -> dict[str, int]:
 
 
 def get_coupon_events_dates(start_date: date, end_date: date) -> list[date]:
-    if not GOOGLE_SHEETS_ENABLED or not GOOGLE_SERVICE_ACCOUNT_JSON:
-        raise RuntimeError("Google Sheets integration is disabled")
-
-    import gspread  # type: ignore[import-not-found]
-    from google.oauth2.service_account import Credentials  # type: ignore[import-not-found]
-
-    account_info = normalize_service_account_info(parse_google_service_account(GOOGLE_SERVICE_ACCOUNT_JSON))
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive.readonly",
-    ]
-    credentials = Credentials.from_service_account_info(account_info, scopes=scopes)
-    client = gspread.authorize(credentials)
-    spreadsheet = client.open_by_key(GOOGLE_SHEETS_SPREADSHEET_ID)
-    worksheet = spreadsheet.worksheet(GOOGLE_SHEETS_WORKSHEET) if GOOGLE_SHEETS_WORKSHEET else spreadsheet.sheet1
-
-    records = worksheet.get_all_records()
-    result: list[date] = []
-    for row in records:
-        event_name = str(row.get("Событие") or row.get("event") or "").strip().lower()
-        if event_name and "скидка" not in event_name:
-            continue
-        row_date = parse_sheet_date(str(row.get("Дата") or row.get("date") or ""))
-        if row_date is None:
-            continue
-        if start_date <= row_date <= end_date:
-            result.append(row_date)
-    return result
+    # Данные дашборда из Google Sheets через credentials отключены.
+    # Сохраняем стабильность endpoint'ов: возвращаем пустой набор.
+    _ = (start_date, end_date)
+    return []
 
 
 def is_dashboard_user_allowed(user_id: Optional[str]) -> bool:
@@ -714,7 +614,6 @@ def is_dashboard_user_allowed(user_id: Optional[str]) -> bool:
 
 
 def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
-    log_coupon_event_to_google_sheet(user_id=user_id, event_name="Скидка за подписку")
     barcode_value, expiry_date = get_coupon_barcode_and_expiry()
     coupon_text = build_coupon_text(expiry_date)
 
@@ -728,6 +627,7 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
                 chat_id=chat_id,
                 attachments=[{"type": "image", "payload": {"token": token}}],
             )
+            log_coupon_event_to_google_sheet(user_id, "Скидка за подписку")
     except Exception as exc:
         logger.exception("Не удалось отправить изображение купона, отправляем fallback без цифрового кода: %s", exc)
         send_max_message(
@@ -739,6 +639,7 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
             user_id=user_id,
             chat_id=chat_id,
         )
+        log_coupon_event_to_google_sheet(user_id, "Скидка за подписку")
 
 
 def _send_coupon_after_subscribe_click(user_id: str) -> None:
@@ -1747,8 +1648,7 @@ def health_config() -> JSONResponse:
                 "startup_self_check": MAX_STARTUP_SELF_CHECK,
                 "google_sheets_enabled": GOOGLE_SHEETS_ENABLED,
                 "google_sheets_spreadsheet_id_set": bool(GOOGLE_SHEETS_SPREADSHEET_ID),
-                "google_sheets_worksheet": GOOGLE_SHEETS_WORKSHEET,
-                "google_service_account_json_set": bool(GOOGLE_SERVICE_ACCOUNT_JSON),
+                "google_script_url_set": bool(GOOGLE_SCRIPT_URL and GOOGLE_SCRIPT_URL != "ВСТАВЬ_СЮДА_URL"),
                 "issues": issues,
             },
         }
