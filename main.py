@@ -51,7 +51,7 @@ GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "15nXvY
 GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 GOOGLE_SCRIPT_URL = os.getenv(
     "GOOGLE_SCRIPT_URL",
-    "https://script.google.com/macros/s/AKfycbyIaGKu-XiPuGYvObXwNsquhY6XF_7KwxAs4NaAQI0wIGPedWZZBbWqQCfcqNnlQ-A7JA/exec",
+    "https://script.google.com/macros/s/AKfycbw81TJmqgmVxMV1NjMzUac7zqDqQialCMTplbpDdqCGgj2iwRbbYl2fYTcz1ee1K-7JQQ/exec",
 )
 ACTIVE_WEBHOOK_UPDATE_TYPES: list[str] = []
 MOSCOW_TZ = timezone(timedelta(hours=3))

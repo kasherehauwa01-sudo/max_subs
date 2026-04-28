@@ -153,8 +153,8 @@ function doPost(e) {
   var now = new Date();
 
   // Если дата/время не пришли из бота — ставим текущие по Москве.
-  var date = data.date || Utilities.formatDate(now, "Europe/Moscow", "dd.MM.yyyy");
-  var time = data.time || Utilities.formatDate(now, "Europe/Moscow", "HH:mm:ss");
+  var date = String(data.date || Utilities.formatDate(now, "Europe/Moscow", "dd.MM.yyyy"));
+  var time = String(data.time || Utilities.formatDate(now, "Europe/Moscow", "HH:mm:ss"));
   var userId = data.user_id || "";
   var event = data.event || "Скидка за подписку";
 
@@ -184,7 +184,7 @@ function doPost(e) {
 В переменные окружения сервиса добавьте:
 
 - `GOOGLE_SHEETS_ENABLED=true`
-- `GOOGLE_SCRIPT_URL=https://script.google.com/macros/s/AKfycbyIaGKu-XiPuGYvObXwNsquhY6XF_7KwxAs4NaAQI0wIGPedWZZBbWqQCfcqNnlQ-A7JA/exec`
+- `GOOGLE_SCRIPT_URL=https://script.google.com/macros/s/AKfycbw81TJmqgmVxMV1NjMzUac7zqDqQialCMTplbpDdqCGgj2iwRbbYl2fYTcz1ee1K-7JQQ/exec`
 
 После сохранения сделайте **Redeploy/Restart**.
 
