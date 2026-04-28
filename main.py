@@ -675,7 +675,6 @@ def get_coupon_events_dates(start_date: date, end_date: date) -> list[datetime]:
 
     date_idx = first_index({"дата", "date"})
     time_idx = first_index({"время", "time"})
-    event_indices = [idx for idx, value in enumerate(header) if value in {"событие", "event"}]
     if date_idx is None:
         logger.warning("Google Sheets CSV has no date column in header: %s", header)
         return []
@@ -686,17 +685,8 @@ def get_coupon_events_dates(start_date: date, end_date: date) -> list[datetime]:
             continue
         raw_date = str(row[date_idx] or "").strip()
         raw_time = str(row[time_idx] or "").strip() if time_idx is not None and len(row) > time_idx else ""
-        event_name = ""
-        for idx in event_indices:
-            if len(row) <= idx:
-                continue
-            candidate = str(row[idx] or "").strip()
-            if candidate:
-                event_name = candidate
-                break
-        event_name = event_name.lower()
-        if event_name and "скидка" not in event_name and "coupon_sent" not in event_name:
-            continue
+        # Для дашборда считаем все строки выдачи купона из таблицы.
+        # Если строка попала в таблицу, это и есть факт выдачи.
         row_dt = parse_sheet_datetime(
             raw_date,
             raw_time,
