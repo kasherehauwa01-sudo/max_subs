@@ -155,8 +155,8 @@ function doPost(e) {
   // Если дата/время не пришли из бота — ставим текущие по Москве.
   var date = String(data.date || Utilities.formatDate(now, "Europe/Moscow", "dd.MM.yyyy"));
   var time = String(data.time || Utilities.formatDate(now, "Europe/Moscow", "HH:mm:ss"));
-  var userId = data.user_id || "";
-  var event = data.event || "Скидка за подписку";
+  var userId = data.user_id || data.userId || "";
+  var event = data.event || data.event_name || "Скидка за подписку";
 
   // Порядок колонок:
   // A = Дата, B = Время, C = user_id, D = Событие
@@ -170,6 +170,9 @@ function doPost(e) {
   return ContentService.createTextOutput("OK");
 }
 ```
+
+> Важно: замените старый `doPost` полностью. В `appendRow` должно быть ровно **4** значения:
+> `[date, time, userId, event]`.
 
 ### 3) Опубликуйте веб‑приложение
 

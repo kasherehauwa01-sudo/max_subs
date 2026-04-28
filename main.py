@@ -529,7 +529,9 @@ def log_to_sheets(user_id: int, event: str) -> None:
         "date": now_moscow.strftime("%d.%m.%Y"),
         "time": now_moscow.strftime("%H:%M:%S"),
         "user_id": int(uid),
+        "userId": str(uid),
         "event": event,
+        "event_name": event,
     }
     print("📤 Отправка в Google Sheets:", payload)
     try:
