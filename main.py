@@ -637,65 +637,28 @@ def aggregate_dates(dates: list[date | datetime], granularity: str) -> dict[str,
     return dict(sorted(buckets.items(), key=lambda x: x[0]))
 
 
-def get_coupon_events_dates(start_date: date, end_date: date) -> list[datetime]:
-    if not GOOGLE_SHEETS_SPREADSHEET_ID:
-        logger.warning("GOOGLE_SHEETS_SPREADSHEET_ID is empty; dashboard will return no rows")
+def get_coupon_events_dates(start_date: date, end_date: date) -> list[date]:
+    if not GOOGLE_SCRIPT_URL or GOOGLE_SCRIPT_URL == "ВСТАВЬ_СЮДА_URL":
         return []
 
-    candidate_urls = [
-        f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEETS_SPREADSHEET_ID}/gviz/tq?tqx=out:csv&gid=0",
-        f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEETS_SPREADSHEET_ID}/export?format=csv&gid=0",
-    ]
-    response = None
-    for url in candidate_urls:
-        try:
-            current = requests.get(url, timeout=10)
-        except requests.RequestException as exc:
-            logger.warning("Dashboard CSV request failed for url=%s: %s", url, exc)
-            continue
-        if current.status_code >= 400:
-            logger.warning("Dashboard CSV request returned status=%s for url=%s", current.status_code, url)
-            continue
-        response = current
-        break
-    if response is None:
-        logger.warning("Could not load Google Sheets CSV from any known URL")
+    try:
+        resp = requests.get(GOOGLE_SCRIPT_URL, timeout=5)
+        data = resp.json()
+
+        if not data.get("ok"):
+            return []
+
+        result = []
+        for d in data.get("dates", []):
+            dt = datetime.strptime(d, "%Y-%m-%d").date()
+            if start_date <= dt <= end_date:
+                result.append(dt)
+
+        return result
+
+    except Exception as e:
+        print("Ошибка чтения из Google Sheets:", e)
         return []
-
-    rows = list(csv.reader(io.StringIO(response.text)))
-    if not rows:
-        return []
-    header = [str(item or "").strip().lower() for item in rows[0]]
-
-    def first_index(candidates: set[str]) -> Optional[int]:
-        for idx, value in enumerate(header):
-            if value in candidates:
-                return idx
-        return None
-
-    date_idx = first_index({"дата", "date"})
-    time_idx = first_index({"время", "time"})
-    if date_idx is None:
-        logger.warning("Google Sheets CSV has no date column in header: %s", header)
-        return []
-
-    result: list[datetime] = []
-    for row in rows[1:]:
-        if len(row) <= date_idx:
-            continue
-        raw_date = str(row[date_idx] or "").strip()
-        raw_time = str(row[time_idx] or "").strip() if time_idx is not None and len(row) > time_idx else ""
-        # Для дашборда считаем все строки выдачи купона из таблицы.
-        # Если строка попала в таблицу, это и есть факт выдачи.
-        row_dt = parse_sheet_datetime(
-            raw_date,
-            raw_time,
-        )
-        if row_dt is None:
-            continue
-        if start_date <= row_dt.date() <= end_date:
-            result.append(row_dt)
-    return result
 
 
 def is_dashboard_user_allowed(user_id: Optional[str]) -> bool:
