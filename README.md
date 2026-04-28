@@ -154,8 +154,8 @@ function doPost(e) {
   
   var now = new Date();
   
-  var date = Utilities.formatDate(now, "Europe/Moscow", "yyyy.MM.dd");
-  var time = Utilities.formatDate(now, "Europe/Moscow", "HH:mm:ss");
+  var date = data.date || Utilities.formatDate(now, "Europe/Moscow", "dd.MM.yyyy");
+  var time = data.time || Utilities.formatDate(now, "Europe/Moscow", "HH:mm:ss");
   
   sheet.appendRow([
     date,                     // Дата
@@ -194,7 +194,7 @@ function doPost(e) {
 3. Убедитесь, что в таблице появилась новая строка.
 
 При отправке купона бот добавляет строку:
-- `Дата` — YYYY.MM.DD (`Europe/Moscow`)
+- `Дата` — DD.MM.YYYY (`Europe/Moscow`)
 - `время` — HH:MM:SS (`Europe/Moscow`)
 - `user_id` — id пользователя
 - `Событие` — `Скидка за подписку`

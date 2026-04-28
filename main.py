@@ -524,7 +524,10 @@ def log_to_sheets(user_id: int, event: str) -> None:
         print("Ошибка: пустой user_id")
         return
 
+    now_moscow = datetime.now(MOSCOW_TZ)
     payload = {
+        "date": now_moscow.strftime("%d.%m.%Y"),
+        "time": now_moscow.strftime("%H:%M:%S"),
         "user_id": int(uid),
         "event": event,
     }
