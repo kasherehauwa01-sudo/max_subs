@@ -144,24 +144,27 @@ curl http://localhost:8000/health/max
 
 ### 2) Создайте Apps Script
 
-Откройте таблицу → **Extensions → Apps Script** и вставьте код:
+Откройте таблицу → **Extensions → Apps Script** и вставьте **новый код**:
 
 ```javascript
 function doPost(e) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  
-  var data = JSON.parse(e.postData.contents);
-  
+  var data = JSON.parse((e && e.postData && e.postData.contents) || "{}");
   var now = new Date();
-  
+
+  // Если дата/время не пришли из бота — ставим текущие по Москве.
   var date = data.date || Utilities.formatDate(now, "Europe/Moscow", "dd.MM.yyyy");
   var time = data.time || Utilities.formatDate(now, "Europe/Moscow", "HH:mm:ss");
-  
+  var userId = data.user_id || "";
+  var event = data.event || "Скидка за подписку";
+
+  // Порядок колонок:
+  // A = Дата, B = Время, C = user_id, D = Событие
   sheet.appendRow([
     date,                     // Дата
     time,                     // Время
-    data.user_id,             // user_id
-    "Скидка за подписку"      // Событие
+    userId,                   // user_id
+    event                     // Событие
   ]);
 
   return ContentService.createTextOutput("OK");
@@ -181,7 +184,7 @@ function doPost(e) {
 В переменные окружения сервиса добавьте:
 
 - `GOOGLE_SHEETS_ENABLED=true`
-- `GOOGLE_SCRIPT_URL=https://script.google.com/macros/s/AKfycbx8YhwFI-zxlaGmDmYl7bMwaXye-V7pkQmLLQhnTDrFCofkvBG5WwshHuIw34r4ILEl/exec`
+- `GOOGLE_SCRIPT_URL=https://script.google.com/macros/s/AKfycbyIaGKu-XiPuGYvObXwNsquhY6XF_7KwxAs4NaAQI0wIGPedWZZBbWqQCfcqNnlQ-A7JA/exec`
 
 После сохранения сделайте **Redeploy/Restart**.
 
