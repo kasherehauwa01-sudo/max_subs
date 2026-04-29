@@ -674,6 +674,7 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
                 chat_id=chat_id,
                 attachments=[{"type": "image", "payload": {"token": token}}],
             )
+            print("DEBUG: лог в таблицу вызывается")
             log_coupon_event_to_google_sheet(user_id, "Скидка за подписку")
     except Exception as exc:
         logger.exception("Не удалось отправить изображение купона, отправляем fallback без цифрового кода: %s", exc)
@@ -686,6 +687,7 @@ def send_coupon(user_id: Optional[str], chat_id: Optional[str]) -> None:
             user_id=user_id,
             chat_id=chat_id,
         )
+        print("DEBUG: лог в таблицу вызывается")
         log_coupon_event_to_google_sheet(user_id, "Скидка за подписку")
 
 
