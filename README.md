@@ -129,19 +129,18 @@ curl http://localhost:8000/health/max
 
 ## Интеграция Google Sheets
 
-Запись событий в Google Sheets в текущей версии **отключена**.
-Данные о выдаче купонов в таблицу бот сейчас не отправляет.
+Бот записывает данные о выданных купонах в Google Sheets через Google Apps Script webhook.
 
 ### 1) Подготовьте Google Таблицу
 
 Таблица проекта:
-`https://docs.google.com/spreadsheets/d/15nXvYljl4yqNsw_nYLpNzFIo4SLlTQyQDaD2Y77Ll-8/edit?gid=0#gid=0`
+`https://docs.google.com/spreadsheets/d/1YKZ5dT_akLxOErQspgKmQBUWKzK0IcPbyeZ2zjjN7GI/edit?gid=0#gid=0`
 
 В строке 1 создайте заголовки:
-- `Дата`
-- `время`
+- `date`
+- `time`
 - `user_id`
-- `Событие`
+- `coment`
 
 ### 2) Создайте Apps Script
 
@@ -156,16 +155,16 @@ function doPost(e) {
   // Если дата/время не пришли из бота — ставим текущие по Москве.
   var date = String(data.date || Utilities.formatDate(now, "Europe/Moscow", "dd.MM.yyyy"));
   var time = String(data.time || Utilities.formatDate(now, "Europe/Moscow", "HH:mm:ss"));
-  var userId = data.user_id || data.userId || "";
-  var event = data.event || data.event_name || "Скидка за подписку";
+  var userId = data.user_id || "";
+  var coment = data.coment || "Купон за подписку";
 
   // Порядок колонок:
-  // A = Дата, B = Время, C = user_id, D = Событие
+  // A = date, B = time, C = user_id, D = coment
   sheet.appendRow([
-    date,                     // Дата
-    time,                     // Время
+    date,                     // date
+    time,                     // time
     userId,                   // user_id
-    event                     // Событие
+    coment                    // coment
   ]);
 
   return ContentService.createTextOutput("OK");
@@ -173,7 +172,7 @@ function doPost(e) {
 ```
 
 > Важно: замените старый `doPost` полностью. В `appendRow` должно быть ровно **4** значения:
-> `[date, time, userId, event]`.
+> `[date, time, userId, coment]`.
 
 ### 3) Опубликуйте веб‑приложение
 
@@ -188,23 +187,20 @@ function doPost(e) {
 В переменные окружения сервиса добавьте:
 
 - `GOOGLE_SHEETS_ENABLED=true`
-- `GOOGLE_SCRIPT_URL=https://script.google.com/macros/s/AKfycbw81TJmqgmVxMV1NjMzUac7zqDqQialCMTplbpDdqCGgj2iwRbbYl2fYTcz1ee1K-7JQQ/exec`
+- `GOOGLE_SCRIPT_URL=<URL вашего Apps Script web app>`
 
 После сохранения сделайте **Redeploy/Restart**.
 
 ### 5) Проверка
 
 1. Выполните сценарий отправки купона.
-2. В логах бота должны появляться:
-   - `📤 Отправка в Google Sheets: ...`
-   - `📥 Ответ Google Script: 200 OK` (или код ошибки).
-3. Убедитесь, что в таблице появилась новая строка.
+2. Убедитесь, что в таблице появилась новая строка.
 
 При отправке купона бот добавляет строку:
-- `Дата` — DD.MM.YYYY (`Europe/Moscow`)
-- `время` — HH:MM:SS (`Europe/Moscow`)
+- `date` — DD.MM.YYYY (`Europe/Moscow`)
+- `time` — HH:MM:SS (`Europe/Moscow`)
 - `user_id` — id пользователя
-- `Событие` — `Скидка за подписку`
+- `coment` — `Купон за подписку`
 
 ### Повторная выдача купона
 

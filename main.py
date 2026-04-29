@@ -17,8 +17,11 @@ from urllib.parse import urlparse
 
 import requests
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+
+load_dotenv()
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -513,15 +516,38 @@ def send_max_message(
 
 
 def log_to_sheets(user_id: int, event: str) -> None:
-    _ = (user_id, event)
-    logger.info("Google Sheets write is disabled")
+    if not GOOGLE_SHEETS_ENABLED:
+        return
+    if not GOOGLE_SCRIPT_URL or GOOGLE_SCRIPT_URL == "ВСТАВЬ_СЮДА_URL":
+        logger.warning("GOOGLE_SCRIPT_URL is empty, skip sheets write")
+        return
+
+    uid = str(user_id).strip()
+    if not uid:
+        return
+
+    now_moscow = datetime.now(MOSCOW_TZ)
+    payload = {
+        "date": now_moscow.strftime("%d.%m.%Y"),
+        "time": now_moscow.strftime("%H:%M:%S"),
+        "user_id": uid,
+        "coment": "Купон за подписку",
+        "event": event,
+    }
+    try:
+        requests.post(GOOGLE_SCRIPT_URL, json=payload, timeout=5)
+    except Exception as exc:
+        logger.warning("Google Sheets write failed: %s", exc)
 
 
 def log_coupon_event_to_google_sheet(user_id: Optional[str], event_name: str = "Скидка за подписку") -> None:
     uid = str(user_id or "").strip()
     if not uid:
         return
-    print(f"LOG EVENT SKIPPED: user_id={uid}, event={event_name}")
+    try:
+        log_to_sheets(int(uid), event_name)
+    except Exception as exc:
+        logger.warning("Failed to log coupon event to sheets for user_id=%s: %s", uid, exc)
 
 
 def get_google_sheets_config_issues() -> list[str]:
