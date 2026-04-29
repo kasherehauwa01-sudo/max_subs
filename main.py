@@ -1581,9 +1581,8 @@ def root() -> str:
 @app.get("/dashboard", response_class=HTMLResponse)
 @app.get("/max_sub/statistic", response_class=HTMLResponse)
 def dashboard_page(user_id: str) -> str:
-    if not is_dashboard_user_allowed(user_id):
-        raise HTTPException(status_code=403, detail="Доступ к дашборду запрещен")
-    return render_dashboard_html()
+    _ = user_id
+    raise HTTPException(status_code=404, detail="Дашборд отключен")
 
 
 def resolve_period_dates(period: str, date_from: Optional[str], date_to: Optional[str], now_utc: datetime) -> tuple[date, date]:
@@ -1618,34 +1617,8 @@ def dashboard_data(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> JSONResponse:
-    if not is_dashboard_user_allowed(user_id):
-        raise HTTPException(status_code=403, detail="Доступ к дашборду запрещен")
-    if granularity not in {"hour", "day", "week", "month"}:
-        raise HTTPException(status_code=400, detail="granularity должен быть hour, day, week или month")
-
-    start_date, end_date = resolve_period_dates(period, date_from, date_to, datetime.now(MOSCOW_TZ))
-    try:
-        event_dates = get_coupon_events_dates(start_date=start_date, end_date=end_date)
-        buckets = aggregate_dates(event_dates, granularity)
-        logger.info("Dashboard loaded rows=%s buckets=%s granularity=%s", len(event_dates), len(buckets), granularity)
-    except Exception as exc:
-        logger.exception("Dashboard data error: %s", exc)
-        raise HTTPException(status_code=500, detail="Не удалось загрузить данные дашборда") from exc
-
-    labels = list(buckets.keys())
-    values = [buckets[k] for k in labels]
-    return JSONResponse(
-        {
-            "ok": True,
-            "period": period,
-            "granularity": granularity,
-            "period_start": start_date.isoformat(),
-            "period_end": end_date.isoformat(),
-            "labels": labels,
-            "values": values,
-            "total": sum(values),
-        }
-    )
+    _ = (user_id, period, granularity, date_from, date_to)
+    raise HTTPException(status_code=404, detail="Дашборд отключен")
 
 
 @app.get("/webhook")
