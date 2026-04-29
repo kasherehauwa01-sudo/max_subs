@@ -127,9 +127,10 @@ curl http://localhost:8000/health
 curl http://localhost:8000/health/max
 ```
 
-## Интеграция Google Sheets (Timeweb + Google Apps Script)
+## Интеграция Google Sheets
 
-Чтобы бот писал события выдачи купона в Google Sheets, используется webhook Google Apps Script (`GOOGLE_SCRIPT_URL`).
+Запись событий в Google Sheets в текущей версии **отключена**.
+Данные о выдаче купонов в таблицу бот сейчас не отправляет.
 
 ### 1) Подготовьте Google Таблицу
 
