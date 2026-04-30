@@ -127,38 +127,80 @@ curl http://localhost:8000/health
 curl http://localhost:8000/health/max
 ```
 
-## Интеграция Google Sheets (Railway)
+## Интеграция Google Sheets
 
-Чтобы писать события отправки купона в таблицу  
-`https://docs.google.com/spreadsheets/d/15nXvYljl4yqNsw_nYLpNzFIo4SLlTQyQDaD2Y77Ll-8/edit?gid=0#gid=0`:
+Бот записывает данные о выданных купонах в Google Sheets через Google Apps Script webhook.
 
-1. В таблице создайте заголовки в строке 1:
-   - `Дата`
-   - `время`
-   - `user_id`
-   - `Событие`
-2. Начиная со 2-й строки бот будет добавлять записи в эти колонки.
-3. Создайте Service Account в Google Cloud и скачайте JSON-ключ.
-4. Дайте этому service account доступ **Editor** к таблице (поделитесь таблицей на e-mail service account).
-5. В Railway добавьте переменные:
-   - `GOOGLE_SHEETS_ENABLED=true`
-   - `GOOGLE_SHEETS_SPREADSHEET_ID=15nXvYljl4yqNsw_nYLpNzFIo4SLlTQyQDaD2Y77Ll-8`
-   - `GOOGLE_SHEETS_WORKSHEET=` (пусто для первого листа или укажите имя листа)
-   - `GOOGLE_SERVICE_ACCOUNT_JSON=<raw JSON | JSON в кавычках | base64(JSON) | путь к JSON-файлу>`
-6. Перезапустите сервис.
+### 1) Подготовьте Google Таблицу
 
-> Если в логах видите `No key could be detected`, обычно причина в `private_key`:
-> в Railway внутри JSON должны быть `\\n` (двойной backslash + n).  
-> Код автоматически преобразует `\\n` в реальные переносы строк перед авторизацией.
->
-> Для диагностики откройте `GET /health/config` — там в `config.issues` будут причины
-> (например, ошибка разбора `GOOGLE_SERVICE_ACCOUNT_JSON` или отсутствие обязательных полей).
+Таблица проекта:
+`https://docs.google.com/spreadsheets/d/1YKZ5dT_akLxOErQspgKmQBUWKzK0IcPbyeZ2zjjN7GI/edit?gid=0#gid=0`
+
+В строке 1 создайте заголовки:
+- `date`
+- `time`
+- `user_id`
+- `coment`
+
+### 2) Создайте Apps Script
+
+Откройте таблицу → **Extensions → Apps Script** и вставьте **новый код**:
+
+```javascript
+function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var data = JSON.parse((e && e.postData && e.postData.contents) || "{}");
+  var now = new Date();
+
+  // Если дата/время не пришли из бота — ставим текущие по Москве.
+  var date = String(data.date || Utilities.formatDate(now, "Europe/Moscow", "dd.MM.yyyy"));
+  var time = String(data.time || Utilities.formatDate(now, "Europe/Moscow", "HH:mm:ss"));
+  var userId = data.user_id || "";
+  var coment = data.coment || "Купон за подписку";
+
+  // Порядок колонок:
+  // A = date, B = time, C = user_id, D = coment
+  sheet.appendRow([
+    date,                     // date
+    time,                     // time
+    userId,                   // user_id
+    coment                    // coment
+  ]);
+
+  return ContentService.createTextOutput("OK");
+}
+```
+
+> Важно: замените старый `doPost` полностью. В `appendRow` должно быть ровно **4** значения:
+> `[date, time, userId, coment]`.
+
+### 3) Опубликуйте веб‑приложение
+
+1. Нажмите **Deploy → New deployment**.
+2. Тип: **Web app**.
+3. `Execute as`: **Me**.
+4. `Who has access`: **Anyone** (или по вашей политике доступа).
+5. Скопируйте URL веб‑приложения.
+
+### 4) Добавьте secret в Timeweb
+
+В переменные окружения сервиса добавьте:
+
+- `GOOGLE_SHEETS_ENABLED=true`
+- `GOOGLE_SCRIPT_URL=<URL вашего Apps Script web app>`
+
+После сохранения сделайте **Redeploy/Restart**.
+
+### 5) Проверка
+
+1. Выполните сценарий отправки купона.
+2. Убедитесь, что в таблице появилась новая строка.
 
 При отправке купона бот добавляет строку:
-- `Дата` — YYYY-MM-DD (UTC)
-- `время` — HH:MM:SS (UTC)
+- `date` — DD.MM.YYYY (`Europe/Moscow`)
+- `time` — HH:MM:SS (`Europe/Moscow`)
 - `user_id` — id пользователя
-- `Событие` — `Скидка за подписку`
+- `coment` — `Купон за подписку`
 
 ### Повторная выдача купона
 
@@ -171,14 +213,7 @@ curl http://localhost:8000/health/max
   `Обновить штрихкоды в 1с`.
 
 ### Дашборд статистики купонов
-
-- Endpoint интерфейса: `GET /dashboard`
-- Данные: `GET /dashboard/data`
-- Доступ к `/dashboard` и `/dashboard/data` разрешен только для `user_id=242649311` и `user_id=24324984`.
-- Периоды: `Вчера`, `Сегодня`, `Неделя`, `Месяц`, `Квартал`, `Ручной выбор периода`.
-- Детализация диаграммы: `По дням`, `По неделям`, `По месяцам`.
-- Если пользователь с `user_id=242649311` или `user_id=24324984` пишет боту `Дашборд` или `Статистика`,
-  бот отправляет сообщение с кнопкой перехода в интерфейс дашборда.
+- Дашборд отключен в текущей версии.
 
 ---
 
