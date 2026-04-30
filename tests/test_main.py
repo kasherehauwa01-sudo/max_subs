@@ -147,7 +147,9 @@ class TestMainHelpers(unittest.TestCase):
         self.assertIn("Статистика отправленных купонов", html)
         self.assertIn("Ручной выбор периода", html)
         self.assertIn("По дням", html)
-        self.assertIn("/dashboard/data", html)
+        self.assertIn("/max_sub/statistic/data", html)
+        self.assertIn("По часам", html)
+        self.assertIn("Год", html)
         self.assertIn("user_id", html)
 
     def test_contains_user_id_recursive(self) -> None:
@@ -243,10 +245,15 @@ class TestMainHelpers(unittest.TestCase):
             send_mock.assert_not_called()
 
     def test_aggregate_dates_day_week_month(self) -> None:
-        dates = [date(2026, 4, 1), date(2026, 4, 1), date(2026, 4, 8)]
-        self.assertEqual(main.aggregate_dates(dates, "day")["2026-04-01"], 2)
-        self.assertIn("2026-W14", main.aggregate_dates(dates, "week"))
-        self.assertEqual(main.aggregate_dates(dates, "month")["2026-04"], 3)
+        dates = [
+            datetime(2026, 4, 1, 10, 0),
+            datetime(2026, 4, 1, 10, 30),
+            datetime(2026, 4, 8, 12, 0),
+        ]
+        self.assertEqual(main.aggregate_datetimes(dates, "day")["2026-04-01"], 2)
+        self.assertIn("2026-W14", main.aggregate_datetimes(dates, "week"))
+        self.assertEqual(main.aggregate_datetimes(dates, "month")["2026-04"], 3)
+        self.assertEqual(main.aggregate_datetimes(dates, "hour")["2026-04-01 10:00"], 2)
 
     def test_resolve_period_dates_custom(self) -> None:
         start, end = main.resolve_period_dates("custom", "2026-04-01", "2026-04-10", datetime(2026, 4, 14, tzinfo=timezone.utc))
