@@ -1480,7 +1480,7 @@ def render_dashboard_html() -> str:
               <option value="today" selected>Сегодня</option>
               <option value="week">Неделя</option>
               <option value="month">Месяц</option>
-              <option value="quarter">Квартал</option>
+              <option value="year">Год</option>
               <option value="custom">Ручной выбор периода</option>
             </select>
           </div>
@@ -1582,7 +1582,7 @@ def render_dashboard_html() -> str:
           params.set('date_from', dateFromEl.value);
           params.set('date_to', dateToEl.value);
         }
-        const res = await fetch(`/dashboard/data?${params.toString()}`);
+        const res = await fetch(`/max_sub/statistic/data?${params.toString()}`);
         const data = await res.json();
         if (!res.ok || !data.ok) {
           errorEl.textContent = data.detail || 'Не удалось загрузить статистику.';
@@ -1631,8 +1631,8 @@ def resolve_period_dates(period: str, date_from: Optional[str], date_to: Optiona
         return today - timedelta(days=6), today
     if period == "month":
         return today - timedelta(days=29), today
-    if period == "quarter":
-        return today - timedelta(days=89), today
+    if period == "year":
+        return today - timedelta(days=364), today
     if period == "custom":
         if not date_from or not date_to:
             raise HTTPException(status_code=400, detail="Для custom периода укажите date_from и date_to")
