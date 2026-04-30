@@ -1612,15 +1612,11 @@ def root() -> str:
 
 @app.get("/dashboard", response_class=HTMLResponse)
 @app.get("/max_sub/statistic", response_class=HTMLResponse)
-def dashboard_page(user_id: str) -> str:
-    _ = user_id
-    raise HTTPException(status_code=404, detail="Дашборд отключен")
-
-
-@app.get("/max_sub/statistic", response_class=HTMLResponse)
-def statistic_page(user_id: str) -> str:
-    if not is_dashboard_user_allowed(user_id):
-        raise HTTPException(status_code=403, detail="Доступ к дашборду запрещен")
+def dashboard_page(user_id: Optional[str] = None) -> str:
+    if os.getenv("DASHBOARD_ENABLED", "true").lower() == "false":
+        raise HTTPException(status_code=403, detail="Дашборд отключен")
+    if user_id and not is_dashboard_user_allowed(user_id):
+        raise HTTPException(status_code=403, detail="Недостаточно прав для просмотра дашборда")
     return render_dashboard_html()
 
 
@@ -1656,19 +1652,28 @@ def dashboard_data(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> JSONResponse:
-    _ = (user_id, period, granularity, date_from, date_to)
-    raise HTTPException(status_code=404, detail="Дашборд отключен")
+    if os.getenv("DASHBOARD_ENABLED", "true").lower() == "false":
+        raise HTTPException(status_code=403, detail="Дашборд отключен")
+    if not is_dashboard_user_allowed(user_id):
+        raise HTTPException(status_code=403, detail="Недостаточно прав для просмотра дашборда")
+    if granularity not in {"hour", "day", "week", "month"}:
+        raise HTTPException(status_code=400, detail="Неверная детализация")
 
-
-@app.get("/max_sub/statistic/data")
-def statistic_data(
-    user_id: str,
-    period: str = "today",
-    granularity: str = "day",
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-) -> JSONResponse:
-    return dashboard_data(user_id=user_id, period=period, granularity=granularity, date_from=date_from, date_to=date_to)
+    start_date, end_date = resolve_period_dates(period, date_from, date_to, datetime.now(timezone.utc))
+    dates = get_coupon_events_dates(start_date, end_date)
+    dt_values = [datetime.combine(d, datetime.min.time()) for d in dates]
+    buckets = aggregate_dates(dt_values, granularity)
+    return JSONResponse(
+        {
+            "ok": True,
+            "labels": list(buckets.keys()),
+            "values": list(buckets.values()),
+            "total": len(dates),
+            "period_start": start_date.isoformat(),
+            "period_end": end_date.isoformat(),
+            "granularity": granularity,
+        }
+    )
 
 
 @app.get("/webhook")
