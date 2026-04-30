@@ -1,5 +1,3 @@
-Запуск бота на timeweb чтобы консоль была свободна: nohup uvicorn main:app --host 0.0.0.0 --port 8000 > bot.log 2>&1 &
-
 # MAX ID Bot (Webhook + FastAPI)
 
 Бот для мессенджера MAX, который получает входящие webhook-события и работает с miniapp/купонами.
