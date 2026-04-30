@@ -54,7 +54,7 @@ GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "15nXvY
 GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 GOOGLE_SCRIPT_URL = os.getenv(
     "GOOGLE_SCRIPT_URL",
-    "https://script.google.com/macros/s/AKfycbzIFTRRWg5WBNzUXZHOM4caBJEeSgj1RuTP6aRPih8ulhYWK0q93_oaAVvOZCEafTnM/exec",
+    "https://script.google.com/macros/s/AKfycbw81TJmqgmVxMV1NjMzUac7zqDqQialCMTplbpDdqCGgj2iwRbbYl2fYTcz1ee1K-7JQQ/exec",
 )
 ACTIVE_WEBHOOK_UPDATE_TYPES: list[str] = []
 MOSCOW_TZ = timezone(timedelta(hours=3))
@@ -1674,6 +1674,18 @@ def dashboard_data(
             "granularity": granularity,
         }
     )
+
+
+@app.get("/dashboard/stats")
+def dashboard_stats() -> dict[str, Any]:
+    url = os.getenv("GOOGLE_SCRIPT_URL")
+    if not url:
+        return {"error": "GOOGLE_SCRIPT_URL not set"}
+    try:
+        response = requests.get(url, timeout=5)
+        return response.json()
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.get("/webhook")
