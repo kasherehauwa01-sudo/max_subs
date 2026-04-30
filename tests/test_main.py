@@ -194,14 +194,14 @@ class TestMainHelpers(unittest.TestCase):
         self.assertEqual(parsed["type"], "service_account")
         self.assertEqual(parsed["project_id"], "p")
 
-    def test_get_google_sheets_config_issues_parse_error(self) -> None:
+    def test_get_google_sheets_config_issues_no_parse_error_for_legacy_service_account(self) -> None:
         original_enabled = main.GOOGLE_SHEETS_ENABLED
         original_sa = main.GOOGLE_SERVICE_ACCOUNT_JSON
         try:
             main.GOOGLE_SHEETS_ENABLED = True
             main.GOOGLE_SERVICE_ACCOUNT_JSON = "not-json-and-not-path"
             issues = main.get_google_sheets_config_issues()
-            self.assertTrue(any("parse error" in issue for issue in issues))
+            self.assertFalse(any("parse error" in issue for issue in issues))
         finally:
             main.GOOGLE_SHEETS_ENABLED = original_enabled
             main.GOOGLE_SERVICE_ACCOUNT_JSON = original_sa
